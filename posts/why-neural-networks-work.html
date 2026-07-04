@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seeing Why Neural Networks Work — Four Live Proofs · Harsha Raju</title>
+  <meta name="description" content="Activations, depth, embeddings, and generalization — proved with live in-browser experiments. All neural net code from scratch in vanilla JavaScript." />
+  <meta property="og:title" content="Seeing Why Neural Networks Work — Four Live Proofs" />
+  <meta property="og:description" content="Activations, depth, embeddings, generalization — proved live in your browser." />
+  <meta property="og:url" content="https://harshvardhanraju.github.io/posts/why-neural-networks-work.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-era">ERA v5 · Session 1</span>
+        <span class="tag tag-ml">Deep Learning</span>
+        <span class="tag tag-viz">Interactive Demo</span>
+      </div>
+      <h1 class="post-heading">Seeing Why Neural Networks Work — Four Live Proofs</h1>
+      <div class="post-header-meta">
+        <span>📅 04 Jul 2026</span>
+        <span>⏱ 12 min read</span>
+        <span><a href="https://github.com/harshvardhanraju/ERAv5/tree/main/Session1" target="_blank">Source code ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Most explanations of deep learning tell you <em>what</em> works. This post shows you <em>why</em> —
+        with four interactive experiments that run entirely in your browser, built from scratch,
+        no libraries, no GPU, just math rendered in real-time.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <p>
+        There's a gap between understanding neural networks at the level of "matrix multiplications and nonlinearities"
+        and genuinely <em>feeling</em> why they work the way they do. I spent a while on the wrong side of that gap.
+      </p>
+
+      <p>
+        The ERA v5 Session 1 assignment asks you to prove four core claims from first principles. Instead of writing
+        Python notebooks, I built a live webapp where every experiment trains in real-time in your browser —
+        the neural nets are implemented from scratch in vanilla JavaScript: forward pass, backprop, SGD, the full thing.
+        No TensorFlow, no PyTorch, no abstraction layer between you and the math.
+      </p>
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s1.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Open the Live Demo
+        </a>
+      </div>
+
+      <p>
+        Here's what each experiment proves and why the result is surprising enough to be worth building.
+      </p>
+
+      <!-- ===== S1-1 ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">01</span>
+          <span class="exp-card-title">Activations Exist for a Reason</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> A model with no nonlinearity can only draw a straight decision boundary — no matter how you train it.
+            Adding a single ReLU hidden layer lets the boundary curve and wrap, turning a 55% accuracy ceiling into ~99%.
+          </div>
+        </div>
+      </div>
+
+      <h3>The Setup</h3>
+      <p>
+        Generate 300 2D points: 150 form an inner ring (class 0), 150 form an outer ring (class 1).
+        The two rings are concentric — no straight line can separate them.
+        This is the simplest possible dataset that is <em>not linearly separable</em>.
+      </p>
+
+      <p>
+        Train two models on exactly this data:
+      </p>
+      <ul>
+        <li><strong>Model A (Linear):</strong> input → Linear(2→1) → Sigmoid. One layer, no hidden units.</li>
+        <li><strong>Model B (ReLU):</strong> input → Linear(2→32) → ReLU → Linear(32→1) → Sigmoid. One hidden layer with 32 units.</li>
+      </ul>
+      <p>Same optimizer, same learning rate, same number of epochs. Only the architecture differs.</p>
+
+      <h3>The Money Shot</h3>
+      <p>
+        After 1000 epochs, the linear model has learned to draw a straight line through the data. It's the best possible
+        straight line — but a straight line can't encircle a ring. Accuracy hovers around 55%: barely better than random.
+      </p>
+      <p>
+        The ReLU model's decision boundary wraps around the inner ring. It doesn't find one line; it pieces together many
+        local linear regions to approximate a curve. Accuracy: ~99%.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Linear model</span>
+          <span class="stat-pill-val" style="color: var(--red)">≈ 55%</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">ReLU model</span>
+          <span class="stat-pill-val" style="color: var(--accent)">≈ 99%</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Only change</span>
+          <span class="stat-pill-val" style="color: var(--text2); font-size:0.8rem">One activation</span>
+        </div>
+      </div>
+
+      <div class="box box-insight">
+        <strong>The key insight:</strong> ReLU doesn't "make the model smarter" in some vague sense.
+        It makes each neuron a <em>hinge</em> — zero below a threshold, linear above it.
+        Stack enough of these hinges and the network can approximate any continuous function.
+        Without them, you're stuck in the linear subspace forever.
+      </div>
+
+      <p>
+        The mathematical reason: a composition of linear functions is still linear.
+        <code>f(g(x)) = (W₂W₁)x = Wₑₓₓ</code>. You can add as many linear layers as you want;
+        they all collapse to a single matrix. ReLU breaks that collapse.
+      </p>
+
+      <!-- ===== S1-2 ===== -->
+      <div class="exp-card" style="border-color: rgba(6,182,212,0.2)">
+        <div class="exp-card-header">
+          <span class="exp-num" style="color:var(--accent2);background:rgba(6,182,212,0.1);border-color:rgba(6,182,212,0.25)">02</span>
+          <span class="exp-card-title">Depth Without Nonlinearity Is a Lie</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> A 5-layer linear network is provably no more powerful than a 1-layer linear network.
+            Both produce identical (bad) boundaries on the ring task. Add ReLU between the same five layers and
+            it suddenly solves it.
+          </div>
+        </div>
+      </div>
+
+      <h3>Three Models, Same Data</h3>
+      <p>Train three models on the ring dataset:</p>
+      <ul>
+        <li><strong>1-Layer Linear:</strong> <code>2 → 1 → sigmoid</code></li>
+        <li><strong>5-Layer Linear:</strong> <code>2 → 4 → 4 → 4 → 4 → 1 → sigmoid</code>, no activations between layers</li>
+        <li><strong>5-Layer ReLU:</strong> Same shape, but ReLU after each hidden layer</li>
+      </ul>
+
+      <h3>The Collapse Proof</h3>
+      <p>
+        For the 5-layer linear model, after training is done, I multiply all five weight matrices together:
+      </p>
+
+      <div class="matrix-proof">
+        <span class="eq">W₁ × W₂ × W₃ × W₄ × W₅ = W<sub>eff</sub></span>
+        <br/>
+        <span style="color: var(--text3)">(2×4) × (4×4) × (4×4) × (4×4) × (4×1)</span>
+        <br/>
+        <span class="eq">= one single 2×1 matrix</span>
+        <span class="note">
+          This is not a metaphor. The demo computes this product numerically and prints the result:
+          two scalar weights, identical in expressive power to the 1-layer model.
+        </span>
+      </div>
+
+      <p>
+        The boundary plots for 1-layer-linear and 5-layer-linear are visually identical: both are straight lines.
+        The 5-layer ReLU model solves the task. Same training, same data, same number of layers.
+        The only difference is whether ReLU breaks the linear chain between layers.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The key insight:</strong> Depth only matters when nonlinearity makes each layer's output
+        genuinely different from a linear transform of the input. Without activations,
+        deep ≠ powerful. It just means more parameters doing the same linear thing.
+      </div>
+
+      <!-- ===== S1-3 ===== -->
+      <div class="exp-card" style="border-color: rgba(16,185,129,0.2)">
+        <div class="exp-card-header">
+          <span class="exp-num" style="color:var(--green);background:rgba(16,185,129,0.1);border-color:rgba(16,185,129,0.25)">03</span>
+          <span class="exp-card-title">Embeddings Learn Similarity from Nothing but Next-Token Prediction</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> A model trained <em>only</em> to predict the next token in a synthetic language
+            will spontaneously cluster semantically related tokens — without ever being told what "similar" means.
+          </div>
+        </div>
+      </div>
+
+      <h3>The Toy Language</h3>
+      <p>
+        Build a tiny synthetic grammar with 8 tokens and two sentence templates:
+      </p>
+      <ul>
+        <li><strong>Animals (3):</strong> cat, dog, cow</li>
+        <li><strong>Fruits (2):</strong> apple, mango</li>
+        <li><strong>Verbs (3):</strong> eat, chase, see</li>
+        <li><strong>Template:</strong> <code>[animal] [verb] [animal | fruit]</code></li>
+      </ul>
+      <p>
+        Generate 1,200 (input, target) pairs by extracting consecutive token pairs from generated sentences.
+        Train an embedding model: <code>lookup(token) → Linear(16→8) → softmax → predict next token</code>.
+        The loss is cross-entropy. No similarity labels. No clustering objective. Just next-token prediction.
+      </p>
+
+      <h3>Emergent Structure</h3>
+      <p>
+        After training, take the 8×16 embedding table and project it to 2D with PCA (implemented from scratch
+        with power iteration). Plot the result.
+      </p>
+      <p>
+        Animals cluster together. Fruits cluster together. Verbs cluster together. No one told the model this.
+        It fell out of the loss function.
+      </p>
+
+      <div class="box box-insight">
+        <strong>Why this happens:</strong> Tokens that appear in identical grammatical positions have identical
+        next-token distributions. The model minimizes CE loss by making their embeddings produce similar output distributions.
+        Similar output distributions → similar embeddings → similar positions in embedding space.
+        <br/><br/>
+        This is why word2vec, GloVe, and every modern LLM embedding works.
+        <em>Semantic similarity is a side effect of predicting context, never the direct objective.</em>
+      </div>
+
+      <p>
+        The nearest-neighbor for every animal is another animal. The nearest-neighbor for every verb is another verb.
+        The demo updates the neighbor table live as training progresses — you can watch the structure emerge
+        over ~300 epochs.
+      </p>
+
+      <!-- ===== S1-4 ===== -->
+      <div class="exp-card" style="border-color: rgba(245,158,11,0.2)">
+        <div class="exp-card-header">
+          <span class="exp-num" style="color:var(--yellow);background:rgba(245,158,11,0.1);border-color:rgba(245,158,11,0.25)">04</span>
+          <span class="exp-card-title">Memorization vs Generalization — Data Closes the Gap</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> An over-parameterized model on tiny data memorizes instead of learning.
+            The generalization gap (test loss − train loss) is huge at n=20, shrinks at n=200, and nearly closes at n=2000.
+            You cannot regularize your way out of too little data.
+          </div>
+        </div>
+      </div>
+
+      <h3>The Setup</h3>
+      <p>
+        Train the same large model — <code>2 → 64 → 64 → 1</code> with ReLU (~4,400 parameters) — on the ring data
+        at three dataset sizes: 20, 200, and 2000 points. Keep a fixed test set of 500 points.
+        Run 600 epochs and track train loss and test loss for all three runs simultaneously.
+      </p>
+
+      <h3>What You See</h3>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">n = 20 train loss</span>
+          <span class="stat-pill-val" style="color: var(--red)">→ 0</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">n = 20 test loss</span>
+          <span class="stat-pill-val" style="color: var(--red)">stays high</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">n = 2000 gap</span>
+          <span class="stat-pill-val" style="color: var(--green)">closes</span>
+        </div>
+      </div>
+
+      <p>
+        With 20 points and 4,400 parameters, the model has ~220× more parameters than data points. It can effortlessly
+        memorize every training point — essentially learning the location of each dot rather than the ring structure.
+        Train loss goes to near zero. Test loss stays high because the memorized solution doesn't generalize.
+      </p>
+      <p>
+        With 2000 points, the model can no longer memorize every individual point. The sheer variety of positions
+        forces it to learn the underlying structure: inner ring vs outer ring. Train and test loss converge.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The key insight:</strong> Memorization is the model doing its job correctly — minimizing training loss.
+        The problem isn't the model, it's the data. With insufficient coverage of the input space,
+        the training loss tells you nothing about generalization.
+        <br/><br/>
+        This is why dataset scale is the single most important hyperparameter in modern ML.
+        Not architecture, not optimizer, not learning rate. Data.
+      </div>
+
+      <h3>The Decision Boundary Visual</h3>
+      <p>
+        The demo also shows the decision boundaries side by side for all three training sizes.
+        At n=20 the boundary is chaotic — fragments and islands of color fitting the 20 training points exactly.
+        At n=2000 it's a clean circle. Same model. Different data.
+      </p>
+
+      <hr class="section-divider" />
+
+      <h2>How It's Built</h2>
+
+      <p>
+        Every neural network in this demo is implemented from scratch in ~600 lines of vanilla JavaScript.
+        No TensorFlow.js. No ml5.js. Just:
+      </p>
+
+      <ul>
+        <li><strong>Matrix operations:</strong> <code>matmul</code>, <code>transpose</code>, <code>hadamard</code>, scalar ops — all plain arrays</li>
+        <li><strong>Forward pass:</strong> sequential layer execution with cache for backprop</li>
+        <li><strong>Backpropagation:</strong> full chain rule, handling ReLU, sigmoid, and linear activations</li>
+        <li><strong>SGD:</strong> full-batch gradient descent (no mini-batching for simplicity)</li>
+        <li><strong>PCA:</strong> covariance matrix + power iteration for top-2 eigenvectors</li>
+        <li><strong>Decision boundary:</strong> batch-evaluate a 70×70 grid and colorize via <code>ImageData</code></li>
+      </ul>
+
+      <p>The training runs asynchronously using <code>requestAnimationFrame</code> so the UI updates live without freezing the browser.</p>
+
+      <pre><code>// The core of the backward pass — full chain rule from output to input
+for (let i = L - 1; i >= 0; i--) {
+  const prevA = i === 0 ? cache[0] : cache[i].A;
+  const dW    = mm(tr(prevA), dZ);   // gradient for weights
+  const db    = sumRows(dZ);          // gradient for biases
+
+  if (i > 0) {
+    const dAprev = mm(dZ, tr(W[i]));       // backprop through weights
+    const Zprev  = cache[i].Z;             // cached pre-activations
+    dZ = (layers[i-1].act === 'relu')
+       ? had(dAprev, reluGrad(Zprev))      // ReLU: zero out negative slopes
+       : dAprev;                           // linear: identity pass-through
+  }
+  W[i] = msub(W[i], smul(dW, lr));
+  b[i] = vsub(b[i], vscale(db, lr));
+}</code></pre>
+
+      <p>
+        The reason to implement it from scratch rather than using a library: you can't really claim to understand
+        backpropagation until you've debugged a sign error in a chain-rule computation at 1am.
+        Libraries abstract that experience away. Sometimes you want the pain.
+      </p>
+
+      <hr class="section-divider" />
+
+      <h2>References &amp; Further Reading</h2>
+
+      <ul>
+        <li>Hornik et al. (1989) — <em>Multilayer feedforward networks are universal approximators</em>. The theoretical basis for why ReLU networks can approximate any continuous function.</li>
+        <li>Mikolov et al. (2013) — <em>Distributed Representations of Words and Phrases and their Compositionality</em> (word2vec). The paper that made the embedding-as-context-prediction connection explicit.</li>
+        <li>Zhang et al. (2017) — <em>Understanding deep learning requires rethinking generalization</em>. The empirical paper that showed over-parameterized networks memorize random labels, forcing a rethink of classical generalization theory.</li>
+        <li>Goodfellow et al. — <em>Deep Learning</em>, Chapter 6 (Feedforward Networks) and Chapter 7 (Regularization). The standard textbook treatment.</li>
+      </ul>
+
+      <hr class="section-divider" />
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s1.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Run the Experiments Live
+        </a>
+      </div>
+
+      <p style="text-align:center; color: var(--text3); font-size: 0.82rem; margin-top: 0.75rem;">
+        All source code at
+        <a href="https://github.com/harshvardhanraju/ERAv5/tree/main/Session1" target="_blank">github.com/harshvardhanraju/ERAv5</a>
+      </p>
+
+    </div>
+  </div>
+
+  <footer>
+    <div class="footer-inner">
+      <p>ERA v5 · Session 1 · <a href="/">harsha.dev</a> · <a href="https://github.com/harshvardhanraju" target="_blank">GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
