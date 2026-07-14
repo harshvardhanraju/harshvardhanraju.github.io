@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Building a Multilingual BPE Tokenizer That Treats Four Scripts Fairly · Harsha Raju</title>
+  <meta name="description" content="How to train a single 10 000-token BPE vocabulary over English, Hindi, Telugu, and Bengali — and compress all four within a spread of 0.034." />
+  <meta property="og:title" content="Building a Multilingual BPE Tokenizer That Treats Four Scripts Fairly" />
+  <meta property="og:description" content="One vocabulary. Four scripts. A compression spread of 0.034 — and a score of 28 280." />
+  <meta property="og:url" content="https://harshvardhanraju.github.io/posts/multilingual-bpe-tokenizer.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-era">ERA v5 · Session 2</span>
+        <span class="tag tag-ml">NLP</span>
+        <span class="tag tag-viz">Interactive Demo</span>
+      </div>
+      <h1 class="post-heading">Building a Multilingual BPE Tokenizer That Treats Four Scripts Fairly</h1>
+      <div class="post-header-meta">
+        <span>📅 14 Jul 2026</span>
+        <span>⏱ 10 min read</span>
+        <span><a href="https://github.com/harshvardhanraju/ERAv5/tree/main/ses2" target="_blank">Source code ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Most tokenizers are trained on English-dominated data and quietly punish every other language.
+        This post is about building one shared 10 000-token BPE vocabulary for English, Hindi, Telugu, and Bengali —
+        and squeezing the compression gap between all four scripts down to <strong>0.034</strong>, for a score of 28 280.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <p>
+        Every LLM has a tokenizer, and almost every tokenizer has a bias. Feed it a sentence in Hindi and it produces
+        2–4× as many tokens as the English equivalent — which means 2–4× the compute, 2–4× the cost, and a model that's
+        learned to think of Hindi as somehow more "complex" than it actually is.
+      </p>
+
+      <p>
+        The ERA v5 Session 2 assignment forces you to confront this directly: train a <em>single</em> BPE vocabulary of
+        exactly 10 000 tokens over the Wikipedia "India" article in four languages, then measure how evenly it compresses
+        each one. The scoring metric is:
+      </p>
+
+      <div class="box box-claim">
+        <strong>Score = 1000 / (max_fertility − min_fertility)</strong><br>
+        where fertility = BPE tokens produced / faithful units in the original text<br><br>
+        Higher score = tighter spread = more equitable tokenisation.
+      </div>
+
+      <p>
+        The reference solution achieves 6 503 with a spread of 0.154. Ours hits <strong>28 280</strong> with a spread of <strong>0.034</strong>.
+        Here's how.
+      </p>
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s2.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Open the Live Tokenizer Widget
+        </a>
+      </div>
+
+      <!-- ===== What is fertility? ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">01</span>
+          <span class="exp-card-title">What "Fertility" Actually Means</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> Tokenizer quality for a language is best measured not by raw token count,
+            but by how many BPE tokens the tokenizer needs per <em>meaningful unit</em> of the original text.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        A "faithful unit" is defined as: one contiguous run of Unicode letters, marks, or digits — or one visible
+        non-space punctuation character. So "India's" has three faithful units: <code>India</code>, <code>'</code>, <code>s</code>.
+        The number "1,428,627,663" has seven: each digit-run and each comma.
+      </p>
+
+      <p>
+        Fertility = tokens / faithful_units. If the tokenizer maps "India's" to a single token <code>▁India's</code>,
+        that word contributes 1 token for 3 faithful units — a fertility of 0.33 for that word. If it maps "क" to
+        a single token and "क" is one faithful unit, that contributes 1.0. Fertility can go <em>below</em> 1.0 when
+        the tokenizer learns to bundle punctuation into the adjacent word.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">fertility &lt; 1</span>
+          <span class="stat-pill-val" style="color: var(--accent)">tokens &lt; units</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">fertility = 1</span>
+          <span class="stat-pill-val" style="color: var(--text2)">one token per unit</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">fertility &gt; 1</span>
+          <span class="stat-pill-val" style="color: var(--red)">tokens &gt; units</span>
+        </div>
+      </div>
+
+      <!-- ===== The challenge ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">02</span>
+          <span class="exp-card-title">The Four-Language Challenge</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> A tokenizer trained naively on English-heavy data will compress English much better
+            than Indic scripts — not because the scripts are harder, but because they receive fewer BPE merge operations.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The Wikipedia India article in English is 43 000 faithful units. Telugu's is 8 000. If you throw them all
+        into BPE training without adjustment, English word-pairs fire in every merge round, soaking up most of the
+        10 000-token budget. Telugu gets a handful of merges. Hindi and Bengali sit somewhere in between.
+      </p>
+
+      <p>
+        My first naive run confirmed this exactly. English fertility: 1.29. Telugu: 1.29 (happened to be similar).
+        But Maithili — a smaller article — came out at 1.34 and dragged the spread to 0.10, cutting the score in half.
+        The numbers told me the fix wasn't in the algorithm; it was in the training data balance.
+      </p>
+
+      <!-- ===== Design choices ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">03</span>
+          <span class="exp-card-title">Five Design Choices That Mattered</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Claim:</strong> The gap between a 6 500 score and a 28 000 score comes from five specific
+            decisions — not from a fundamentally different algorithm.
+          </div>
+        </div>
+      </div>
+
+      <h3>1. Metaspace pre-tokeniser, not Whitespace</h3>
+      <p>
+        Standard whitespace splitting turns "India's" into three pre-tokens: <code>India</code>, <code>'</code>, <code>s</code>.
+        Each must become at least one BPE token — so you can never get below 3 tokens for 3 faithful units. Fertility floor = 1.0.
+      </p>
+      <p>
+        Metaspace marks word boundaries with ▁ <em>inside</em> the word: "India's" becomes a single pre-token
+        <code>▁India's</code>. If "India's" is common enough (it is — it's the India article), BPE merges it into
+        one token. Now 1 token covers 3 faithful units: fertility contribution = 0.33. The overall fertility can
+        drop below 1.0, which pulls the denominator of the score formula further from zero.
+      </p>
+
+      <h3>2. NFKC normalisation</h3>
+      <p>
+        Indic scripts have multiple Unicode representations for the same glyph: different ordering of combining marks,
+        compatibility vs. canonical forms. NFKC canonicalises all of them before tokenisation, so the same word in
+        two different encodings produces the same tokens. Without this, half your Devanagari character pairs appear
+        twice in the merge statistics and get split across two different merge rules.
+      </p>
+
+      <h3>3. min_frequency = 1</h3>
+      <p>
+        The default HuggingFace BPE trainer uses min_frequency=2, discarding any pair that appears only once. For Telugu
+        (8 000 faithful units) and Bengali (19 000), many valid character-pair patterns appear only once in a single article.
+        Setting min_frequency=1 keeps all of them eligible for merging, which matters enormously for lower-resource scripts.
+      </p>
+
+      <h3>4. Corpus balancing by article size</h3>
+      <p>
+        Telugu's Wikipedia India article is 5× shorter than English's. If I train on each article once, Telugu gets
+        5× fewer pair statistics. I compensate by replicating each article proportionally:
+      </p>
+
+      <pre><code>English  × 3   (43 K faithful units)
+Hindi    × 5   (20 K faithful units)
+Telugu   × 8    (8 K faithful units)
+Bengali  × 8   (19 K faithful units)</code></pre>
+
+      <p>
+        These weights were found empirically by grid search. The sweet spot for Telugu is exactly ×8 — at ×9, it
+        overshoots and drops below Bengali, widening the spread again. The relationship isn't linear and you really do
+        have to run the experiments.
+      </p>
+
+      <h3>5. Bengali as the fourth language</h3>
+      <p>
+        The assignment requires a fourth language of your choice. I tried Maithili first (same as the reference
+        solution) — but its Wikipedia India article is only 4 KB. Even at ×8 replication it contributes less than 2%
+        of the training corpus, so BPE learns almost nothing specific to Maithili. Score: 4 959.
+      </p>
+      <p>
+        Bengali (ভারত) has a 96 KB article — 24× larger. Bengali script also belongs to the same Brahmic family as
+        Devanagari (Hindi), so the two scripts share structural patterns: character categories, vowel sign positions,
+        common conjuncts. Cross-language merges benefit both. Score jumped to 28 280.
+      </p>
+
+      <!-- ===== Results ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">04</span>
+          <span class="exp-card-title">The Numbers</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Result:</strong> All four languages within a fertility range of 1.2576 to 1.2911 — a spread of 0.034.
+            Score 29 820 raw, 28 280 after the Hindi penalty factor.
+          </div>
+        </div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Bengali</span>
+          <span class="stat-pill-val" style="color: var(--accent)">1.2576</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Hindi</span>
+          <span class="stat-pill-val" style="color: var(--accent)">1.2636</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">English</span>
+          <span class="stat-pill-val" style="color: var(--text2)">1.2883</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Telugu</span>
+          <span class="stat-pill-val" style="color: var(--text2)">1.2911</span>
+        </div>
+      </div>
+
+      <p>
+        Hindi sits at 1.2636 — just above the 1.2 threshold that triggers the assignment's "Hindi penalty factor" of
+        exp(max(0, fertility/1.2 − 1)). The penalty here is 1.054, reducing the adjusted score from 29 820 to 28 280.
+        Getting Hindi below 1.2 requires a larger Hindi corpus weight, but that widens the spread in the other direction.
+        It's a genuine tradeoff and 28 280 sits in the Pareto-optimal zone.
+      </p>
+
+      <div class="box box-insight">
+        <strong>What surprised me:</strong> The fertility ratios are extremely sensitive to training weights.
+        Going from Telugu ×8 to ×9 drops Telugu's fertility from 1.291 to 1.202 — jumping it from max to min —
+        while simultaneously pushing English from 1.288 to 1.310. The spread goes from 0.034 to 0.108 in a single step.
+        The landscape is not smooth; the optimum is a narrow ridge.
+      </div>
+
+      <!-- ===== How it's built ===== -->
+      <h2>How It's Built</h2>
+
+      <p>
+        The tokenizer is trained with HuggingFace's <code>tokenizers</code> library (Rust backend, fast) using the
+        BPE model class. Configuration:
+      </p>
+
+      <pre><code>from tokenizers import Tokenizer
+from tokenizers.models import BPE
+from tokenizers.trainers import BpeTrainer
+from tokenizers.pre_tokenizers import Metaspace
+from tokenizers.normalizers import NFKC
+from tokenizers.decoders import Metaspace as MetaspaceDecoder
+
+tok = Tokenizer(BPE(unk_token="[UNK]"))
+tok.normalizer    = NFKC()
+tok.pre_tokenizer = Metaspace(replacement="▁", prepend_scheme="always")
+tok.decoder       = MetaspaceDecoder(replacement="▁", prepend_scheme="always")
+
+trainer = BpeTrainer(
+    vocab_size=10_000,
+    special_tokens=["[UNK]"],
+    min_frequency=1,
+    show_progress=True,
+)
+tok.train_from_iterator(corpus, trainer=trainer)</code></pre>
+
+      <p>
+        The corpus is built by replicating each language's article according to the tuned weights. Wikipedia articles
+        are fetched via the <code>action=parse</code> API endpoint, parsed with BeautifulSoup to extract all visible text
+        (tables, infoboxes, navboxes included — more text means richer pair statistics), then split into paragraph-level
+        lines for the training iterator.
+      </p>
+
+      <p>
+        The faithful-unit counter uses the <code>regex</code> module's Unicode property classes for correct handling
+        of Indic combining marks:
+      </p>
+
+      <pre><code>import regex
+def count_faithful_units(text):
+    return len(regex.findall(
+        r'[\p{L}\p{M}\p{N}]+|[^\s\p{L}\p{M}\p{N}]', text
+    ))</code></pre>
+
+      <p>
+        The web widget re-implements the BPE encoding in JavaScript so tokenisation runs in-browser with no server.
+        The Metaspace pre-tokeniser is reconstructed as: prepend ▁ to the first character of each whitespace-delimited
+        word, then apply merges in priority order using a Map lookup.
+      </p>
+
+      <h2>Reproducing the Results</h2>
+
+      <pre><code>cd ses2
+pip install tokenizers requests beautifulsoup4 lxml regex
+python3 train_bpe.py</code></pre>
+
+      <p>
+        The script fetches the four Wikipedia articles, trains the tokenizer, evaluates fertility, saves
+        <code>tokenizer.json</code>, <code>vocab.json</code>, <code>merges.json</code>, and <code>corpus/*.txt</code>
+        snapshots. The Wikipedia articles change over time, so the corpus snapshots in the repo are the ones used
+        to produce the reported scores.
+      </p>
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s2.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Try the Tokenizer Live →
+        </a>
+      </div>
+
+    </div><!-- .prose -->
+  </div><!-- .post-wrap -->
+
+</body>
+</html>
