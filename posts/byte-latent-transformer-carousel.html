@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Byte Latent Transformer — LinkedIn Carousel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0f0f17;
+      --bg2:    #16162a;
+      --bg3:    #1e1e35;
+      --accent: #8b5cf6;
+      --cyan:   #06b6d4;
+      --green:  #10b981;
+      --yellow: #f59e0b;
+      --red:    #ef4444;
+      --text:   #f1f5f9;
+      --text2:  #94a3b8;
+      --text3:  #475569;
+      --mono:   'JetBrains Mono', monospace;
+      --sans:   'Inter', sans-serif;
+      --slide:  1080px;
+    }
+    html, body { background: #1a1a2e; }
+    .print-hint {
+      font-family: var(--sans); background: #1e293b; color: #94a3b8;
+      padding: 1rem 2rem; font-size: 0.9rem; text-align: center;
+      border-bottom: 1px solid #334155;
+    }
+    .print-hint strong { color: #f1f5f9; }
+    .print-hint code { background: #0f172a; padding: 0.1rem 0.4rem; border-radius: 4px; font-family: monospace; }
+    .slide {
+      width: var(--slide); height: var(--slide);
+      background: var(--bg); font-family: var(--sans); color: var(--text);
+      position: relative; overflow: hidden; margin: 0 auto 4px;
+      display: flex; flex-direction: column;
+    }
+    .slide::before {
+      content: ''; position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(139,92,246,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139,92,246,0.04) 1px, transparent 1px);
+      background-size: 54px 54px; pointer-events: none;
+    }
+    .slide-num { position: absolute; bottom: 36px; right: 48px; font-family: var(--mono); font-size: 0.78rem; color: var(--text3); letter-spacing: 0.05em; }
+    .brand     { position: absolute; bottom: 36px; left: 48px;  font-family: var(--mono); font-size: 0.75rem; color: var(--text3); }
+    .brand span { color: var(--accent); }
+    .top-bar { position: absolute; top: 0; left: 0; right: 0; height: 5px; background: linear-gradient(90deg, var(--accent), var(--cyan)); }
+
+    /* inner layout */
+    .s { position: relative; z-index: 1; padding: 64px 72px; display: flex; flex-direction: column; height: 100%; }
+    .s-tag  { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cyan); margin-bottom: 18px; }
+    .s-head { font-size: 2.8rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 30px; }
+    .hl  { color: var(--accent); }
+    .hl2 { color: var(--cyan); }
+    .hl3 { color: var(--green); }
+
+    /* cover */
+    .cover-inner { position: relative; z-index: 1; padding: 80px; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+    .cover-eyebrow { font-family: var(--mono); font-size: 0.9rem; color: var(--cyan); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 28px; }
+    .cover-title { font-size: 4.8rem; font-weight: 900; line-height: 1.0; letter-spacing: -0.03em; margin-bottom: 28px; }
+    .cover-sub  { font-size: 1.4rem; color: var(--text2); max-width: 700px; line-height: 1.5; margin-bottom: 48px; }
+    .cover-claim {
+      background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3);
+      border-left: 4px solid var(--accent); border-radius: 8px;
+      padding: 18px 26px; font-size: 1.1rem; color: var(--text); line-height: 1.6; max-width: 700px;
+    }
+    .cover-claim strong { color: var(--accent); }
+
+    /* problem slide */
+    .prob-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; flex: 1; }
+    .prob-card { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 24px; }
+    .prob-label { font-family: var(--mono); font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
+    .prob-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+    .chip { font-family: var(--mono); font-size: 0.82rem; padding: 5px 10px; border-radius: 5px; font-weight: 600; }
+    .c-fixed { background: rgba(71,85,105,0.35); color: #94a3b8; border: 1px solid rgba(71,85,105,0.5); }
+    .c-bad   { background: rgba(239,68,68,0.12); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+    .prob-note { font-size: 0.82rem; color: var(--text3); line-height: 1.5; }
+
+    /* arch */
+    .arch-boxes { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 28px; }
+    .arch-box { background: var(--bg2); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 20px 24px; text-align: center; flex: 1; }
+    .ab-local  { border-top: 3px solid var(--cyan); }
+    .ab-latent { border-top: 3px solid var(--accent); background: rgba(139,92,246,0.06); }
+    .ab-decode { border-top: 3px solid var(--green); }
+    .arch-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 6px; }
+    .arch-desc  { font-size: 0.78rem; color: var(--text3); line-height: 1.5; }
+    .arch-arrow { color: var(--text3); font-size: 1.4rem; flex-shrink: 0; }
+
+    /* entropy */
+    .entropy-row { display: flex; align-items: flex-end; gap: 5px; height: 80px; margin-bottom: 10px; }
+    .e-bar { flex: 1; border-radius: 3px 3px 0 0; min-width: 22px; }
+    .e-chars { display: flex; gap: 5px; font-family: var(--mono); font-size: 0.8rem; color: var(--text3); margin-bottom: 20px; }
+    .e-char { flex: 1; text-align: center; min-width: 22px; }
+    .patch-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+    .p-chip { font-family: var(--mono); font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; font-weight: 600; }
+    .pc-easy { background: rgba(16,185,129,0.12); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25); }
+    .pc-hard { background: rgba(139,92,246,0.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.35); }
+    .pc-mid  { background: rgba(245,158,11,0.12); color: #fcd34d; border: 1px solid rgba(245,158,11,0.25); }
+    .legend  { display: flex; gap: 18px; font-size: 0.75rem; color: var(--text3); }
+
+    /* bench */
+    .bench-rows { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+    .bench-row { display: flex; align-items: center; gap: 16px; }
+    .bench-label { font-size: 0.85rem; color: var(--text2); width: 220px; flex-shrink: 0; }
+    .bench-track { flex: 1; height: 36px; background: rgba(255,255,255,0.04); border-radius: 6px; overflow: hidden; }
+    .bench-fill  { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 12px; font-family: var(--mono); font-size: 0.82rem; font-weight: 700; }
+    .bench-note  { font-size: 0.78rem; width: 160px; flex-shrink: 0; }
+
+    /* wins */
+    .win-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; }
+    .win-card { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 24px; }
+    .win-card.good { border-top: 3px solid var(--green); }
+    .win-card.caution { border-top: 3px solid var(--yellow); }
+    .win-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 10px; }
+    .win-text  { font-size: 0.82rem; color: var(--text2); line-height: 1.6; }
+    .win-num   { font-family: var(--mono); font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; }
+
+    /* stat row */
+    .stat-row { display: flex; gap: 14px; margin-bottom: 20px; }
+    .stat-pill { background: var(--bg3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px 18px; flex: 1; }
+    .sp-l { font-size: 0.72rem; color: var(--text3); font-family: var(--mono); margin-bottom: 4px; }
+    .sp-v { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+
+    /* insight */
+    .insight { background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.25); border-left: 4px solid var(--accent); border-radius: 8px; padding: 18px 22px; font-size: 0.92rem; color: var(--text2); line-height: 1.6; }
+    .insight strong { color: var(--text); }
+
+    /* cta */
+    .cta-inner { position: relative; z-index:1; padding: 72px 80px 100px; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+    .cta-title { font-size: 3.6rem; font-weight: 900; line-height: 1.1; letter-spacing: -0.025em; margin-bottom: 36px; }
+    .cta-links { display: flex; flex-direction: column; gap: 16px; margin-bottom: 40px; }
+    .cta-link  { display: flex; align-items: center; gap: 14px; }
+    .cta-icon  { width: 36px; height: 36px; background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.3); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .cta-url   { font-family: var(--mono); font-size: 0.82rem; color: var(--accent); }
+    .cta-lbl   { font-size: 0.92rem; color: var(--text2); }
+    .cta-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .cta-stat  { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; padding: 14px; text-align: center; }
+    .cs-val    { font-family: var(--mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+    .cs-lbl    { font-size: 0.7rem; color: var(--text3); margin-top: 4px; line-height: 1.3; }
+
+    @page { size: 1080px 1080px; margin: 0; }
+    @media print {
+      .print-hint { display: none; }
+      html, body { background: var(--bg); width: 1080px; }
+      .slide { width: 1080px !important; height: 1080px !important; page-break-after: always; break-after: page; margin: 0; overflow: hidden; }
+      .slide:last-child { page-break-after: avoid; break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="print-hint">
+  <strong>Export to PDF for LinkedIn:</strong>
+  Open in <strong>Google Chrome</strong> → <code>Cmd + P</code> → Save as PDF → Uncheck "Headers and footers" → Save.
+  Upload to LinkedIn as a <strong>Document post</strong>.
+  &nbsp;|&nbsp; <a href="byte-latent-transformer.html" style="color:#8b5cf6;">Read full article ↗</a>
+</div>
+
+<!-- SLIDE 1: COVER -->
+<div class="slide">
+  <div class="top-bar"></div>
+  <div class="cover-inner">
+    <div class="cover-eyebrow">Meta AI · ACL 2025 · Deep Dive</div>
+    <div class="cover-title">Byte <span class="hl">Latent</span><br>Transformer</div>
+    <div class="cover-sub">The LLM that works on raw bytes — no vocabulary, no tokenizer, no merge rules</div>
+    <div class="cover-claim">
+      <strong>8B parameters. 4 trillion bytes. No vocabulary.</strong><br>
+      Matched tokenized LLMs for the first time — and outperformed them on noisy and multilingual text.
+    </div>
+  </div>
+  <div class="slide-num">1 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 2: THE PROBLEM WITH FIXED TOKENIZATION -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">The Problem</div>
+    <div class="s-head">Fixed tokenization <span class="hl">allocates wrong</span></div>
+    <div class="prob-grid">
+      <div class="prob-card">
+        <div class="prob-label">Predictable English</div>
+        <div class="prob-chips">
+          <span class="chip c-fixed">the</span>
+          <span class="chip c-fixed">quick</span>
+          <span class="chip c-fixed">fox</span>
+        </div>
+        <div class="prob-note">3 tokens. Each is entirely predictable given context. Same compute as hard text.</div>
+      </div>
+      <div class="prob-card">
+        <div class="prob-label">Arabic morpheme (same compute)</div>
+        <div class="prob-chips">
+          <span class="chip c-bad">▁</span>
+          <span class="chip c-bad">ج</span>
+          <span class="chip c-bad">م</span>
+          <span class="chip c-bad">ي</span>
+          <span class="chip c-bad">ل</span>
+        </div>
+        <div class="prob-note">5 tokens. Each character could be many continuations. But gets identical attention budget.</div>
+      </div>
+      <div class="prob-card">
+        <div class="prob-label">Typo (tokenizer fails)</div>
+        <div class="prob-chips">
+          <span class="chip c-bad">t</span><span class="chip c-bad">eh</span>
+        </div>
+        <div class="prob-note">"teh" → tokenizer produces unfamiliar sequence. Model has no recovery path.</div>
+      </div>
+      <div class="prob-card">
+        <div class="prob-label">Root cause</div>
+        <div class="prob-note" style="font-size:0.9rem;color:var(--text2);">Vocabulary built from frozen corpus snapshot. Boundaries don't reflect what's <em>actually hard</em> about this sequence right now.</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">2 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 3: THE BLT ARCHITECTURE -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Architecture</div>
+    <div class="s-head">Three components, <span class="hl2">one principle</span></div>
+    <div class="arch-boxes">
+      <div class="arch-box ab-local">
+        <div class="arch-title" style="color:var(--cyan)">Local Encoder</div>
+        <div class="arch-desc">Small transformer.<br>Reads raw bytes.<br>Forms patch vectors.</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box ab-latent">
+        <div class="arch-title" style="color:var(--accent)">Latent Transformer</div>
+        <div class="arch-desc">Large transformer.<br>Runs on patches only.<br>All reasoning here.</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-box ab-decode">
+        <div class="arch-title" style="color:var(--green)">Local Decoder</div>
+        <div class="arch-desc">Small transformer.<br>Reconstructs byte<br>probabilities.</div>
+      </div>
+    </div>
+    <div class="insight">
+      The expensive <strong>quadratic attention only runs on patches</strong> — not individual bytes.
+      Each patch represents a variable number of bytes, so the latent transformer's sequence length is
+      much shorter than the raw byte count. This is how byte-level becomes compute-feasible.
+    </div>
+    <div class="stat-row" style="margin-top:24px;">
+      <div class="stat-pill"><div class="sp-l">Input</div><div class="sp-v" style="color:var(--cyan)">Raw bytes</div></div>
+      <div class="stat-pill"><div class="sp-l">Attention scope</div><div class="sp-v">Patches only</div></div>
+      <div class="stat-pill"><div class="sp-l">Vocabulary</div><div class="sp-v" style="color:var(--green)">None</div></div>
+      <div class="stat-pill"><div class="sp-l">Alphabet</div><div class="sp-v" style="color:var(--yellow)">256 bytes</div></div>
+    </div>
+  </div>
+  <div class="slide-num">3 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 4: ENTROPY PATCHING -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">The Key Mechanism</div>
+    <div class="s-head">Entropy → <span class="hl">patch size</span></div>
+    <div style="background:var(--bg2);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:22px 24px;margin-bottom:20px;">
+      <div style="font-size:0.75rem;font-family:var(--mono);color:var(--text3);margin-bottom:12px;">Next-byte entropy across a sequence (higher = harder = smaller patch)</div>
+      <div class="entropy-row">
+        <div class="e-bar" style="height:18%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:15%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:16%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:14%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:17%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:65%;background:rgba(139,92,246,0.7);"></div>
+        <div class="e-bar" style="height:78%;background:rgba(139,92,246,0.8);"></div>
+        <div class="e-bar" style="height:72%;background:rgba(139,92,246,0.75);"></div>
+        <div class="e-bar" style="height:20%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:18%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:55%;background:rgba(245,158,11,0.65);"></div>
+        <div class="e-bar" style="height:70%;background:rgba(245,158,11,0.7);"></div>
+        <div class="e-bar" style="height:22%;background:rgba(16,185,129,0.5);"></div>
+        <div class="e-bar" style="height:19%;background:rgba(16,185,129,0.5);"></div>
+      </div>
+      <div class="e-chars">
+        <span class="e-char">t</span><span class="e-char">h</span><span class="e-char">e</span>
+        <span class="e-char">▁</span><span class="e-char">f</span>
+        <span class="e-char">جـ</span><span class="e-char">مـ</span><span class="e-char">يـ</span>
+        <span class="e-char">ل</span><span class="e-char">▁</span>
+        <span class="e-char">1</span><span class="e-char">2</span><span class="e-char">3</span><span class="e-char">4</span>
+      </div>
+    </div>
+    <div style="margin-bottom:14px;font-size:0.82rem;color:var(--text3);">Resulting patches:</div>
+    <div class="patch-row">
+      <span class="p-chip pc-easy">the fox</span>
+      <span class="p-chip pc-hard">جـ</span><span class="p-chip pc-hard">مـ</span><span class="p-chip pc-hard">يـ</span>
+      <span class="p-chip pc-easy">▁</span>
+      <span class="p-chip pc-mid">12</span><span class="p-chip pc-mid">34</span>
+    </div>
+    <div class="legend">
+      <span style="color:#6ee7b7;">■ large patch — low entropy, easy text</span>
+      <span style="color:#fcd34d;">■ medium patch</span>
+      <span style="color:#c4b5fd;">■ single byte — high entropy, hard text</span>
+    </div>
+  </div>
+  <div class="slide-num">4 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 5: BENCHMARK RESULTS -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Results · ACL 2025</div>
+    <div class="s-head"><span class="hl3">Parity</span> at 8B / 4T bytes</div>
+    <div class="bench-rows">
+      <div class="bench-row">
+        <div class="bench-label">MMLU (5-shot)</div>
+        <div class="bench-track"><div class="bench-fill" style="width:81%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);color:#ede9fe;">BLT 65.2 &nbsp; LLaMA 3 66.6</div></div>
+        <div class="bench-note" style="color:var(--accent);">≈ Parity</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-label">HellaSwag</div>
+        <div class="bench-track"><div class="bench-fill" style="width:83%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);color:#ede9fe;">BLT 81.1 &nbsp; LLaMA 3 82.0</div></div>
+        <div class="bench-note" style="color:var(--accent);">≈ Parity</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-label">ARC-Challenge</div>
+        <div class="bench-track"><div class="bench-fill" style="width:79%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);color:#ede9fe;">BLT 58.3 &nbsp; LLaMA 3 59.1</div></div>
+        <div class="bench-note" style="color:var(--accent);">≈ Parity</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-label">Noisy text (typos)</div>
+        <div class="bench-track"><div class="bench-fill" style="width:95%;background:linear-gradient(90deg,#059669,#10b981);color:#d1fae5;">BLT +8–15% over tokenized baseline</div></div>
+        <div class="bench-note" style="color:var(--green);">BLT wins</div>
+      </div>
+      <div class="bench-row">
+        <div class="bench-label">Rare scripts</div>
+        <div class="bench-track"><div class="bench-fill" style="width:90%;background:linear-gradient(90deg,#059669,#10b981);color:#d1fae5;">BLT +12% over tokenized baseline</div></div>
+        <div class="bench-note" style="color:var(--green);">BLT wins</div>
+      </div>
+    </div>
+    <div class="insight" style="margin-top:20px;">
+      Comparison controlled for <strong>FLOPs, not bytes</strong> — so this is a fair compute-equivalent comparison.
+      Previous byte-level models (MegaByte, ByT5) failed this test. BLT is the first to pass it.
+    </div>
+  </div>
+  <div class="slide-num">5 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 6: TOKEN TAX ELIMINATED -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Why This Matters</div>
+    <div class="s-head">The <span class="hl">token tax</span> doesn't exist in BLT</div>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px;">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text2);width:130px;flex-shrink:0;">English</div>
+        <div style="flex:1;height:40px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden;">
+          <div style="width:22%;height:100%;background:linear-gradient(90deg,#10b981,#34d399);display:flex;align-items:center;padding-left:12px;font-family:var(--mono);font-size:0.85rem;font-weight:700;color:#d1fae5;">1.0×</div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--green);width:110px;flex-shrink:0;">baseline</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text2);width:130px;flex-shrink:0;">Arabic (cl100k)</div>
+        <div style="flex:1;height:40px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden;">
+          <div style="width:73%;height:100%;background:linear-gradient(90deg,#ef4444,#f87171);display:flex;align-items:center;padding-left:12px;font-family:var(--mono);font-size:0.85rem;font-weight:700;color:#fee2e2;">3.3× more tokens</div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--red);width:110px;flex-shrink:0;">3.3× API cost</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text2);width:130px;flex-shrink:0;">Bengali (cl100k)</div>
+        <div style="flex:1;height:40px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden;">
+          <div style="width:100%;height:100%;background:linear-gradient(90deg,#dc2626,#ef4444);display:flex;align-items:center;padding-left:12px;font-family:var(--mono);font-size:0.85rem;font-weight:700;color:#fecaca;">~4.5× more tokens</div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--red);width:110px;flex-shrink:0;">worst case</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-family:var(--mono);font-size:0.85rem;color:var(--text2);width:130px;flex-shrink:0;">Any lang (BLT)</div>
+        <div style="flex:1;height:40px;background:rgba(255,255,255,0.04);border-radius:6px;overflow:hidden;">
+          <div style="width:24%;height:100%;background:linear-gradient(90deg,#10b981,#34d399);display:flex;align-items:center;padding-left:12px;font-family:var(--mono);font-size:0.85rem;font-weight:700;color:#d1fae5;">~1.0×</div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--green);width:110px;flex-shrink:0;">alphabet = 256 bytes</div>
+      </div>
+    </div>
+    <div class="insight">
+      The alphabet is 256 bytes. It covers <strong>every language, every script, every symbol</strong> that can exist.
+      No vocabulary selection problem. No fertility gap. No token tax.
+    </div>
+  </div>
+  <div class="slide-num">6 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 7: WHAT'S STILL OPEN -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">What's Still Open</div>
+    <div class="s-head">Proven at <span class="hl">8B.</span> Unknown at <span class="hl" style="color:var(--yellow)">70B+.</span></div>
+    <div class="win-grid">
+      <div class="win-card good">
+        <div class="win-title" style="color:var(--green)">What BLT proved</div>
+        <div class="win-num" style="color:var(--green)">✓ Parity</div>
+        <div class="win-text">Byte-level and token-level are compute-competitive at 8B. This wasn't true a year ago.</div>
+      </div>
+      <div class="win-card caution">
+        <div class="win-title" style="color:var(--yellow)">Still unproven</div>
+        <div class="win-num" style="color:var(--yellow)">? 70B+</div>
+        <div class="win-text">Nobody has run the experiment at frontier scale. Local encoder overhead may bottleneck at very large sizes.</div>
+      </div>
+      <div class="win-card good">
+        <div class="win-title" style="color:var(--green)">Clear advantages</div>
+        <div class="win-text">Noise robustness (+8–15%), rare script handling (+12%), zero token tax, no OOV tokens, no vocabulary to maintain.</div>
+      </div>
+      <div class="win-card caution">
+        <div class="win-title" style="color:var(--yellow)">Engineering challenges</div>
+        <div class="win-text">Efficient byte-level inference at scale is unsolved. Patch size tuning affects performance. Training infrastructure needs changes.</div>
+      </div>
+    </div>
+    <div class="insight" style="margin-top:20px;">
+      "Can byte-level models work?" is no longer the question. <strong>"When is it worth deploying?"</strong> is.
+    </div>
+  </div>
+  <div class="slide-num">7 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 8: CTA -->
+<div class="slide">
+  <div class="top-bar"></div>
+  <div class="cta-inner">
+    <div style="font-family:var(--mono);font-size:0.8rem;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:22px;">Deep Dive · harsha.dev</div>
+    <div class="cta-title">The end of<br>the <span class="hl">vocabulary?</span></div>
+    <div class="cta-stats" style="margin-bottom:36px;">
+      <div class="cta-stat"><div class="cs-val">8B</div><div class="cs-lbl">parameters at parity</div></div>
+      <div class="cta-stat"><div class="cs-val">4T</div><div class="cs-lbl">bytes trained</div></div>
+      <div class="cta-stat"><div class="cs-val" style="color:var(--green)">+15%</div><div class="cs-lbl">on noisy text</div></div>
+      <div class="cta-stat"><div class="cs-val" style="color:var(--cyan)">256</div><div class="cs-lbl">byte alphabet, forever</div></div>
+    </div>
+    <div class="cta-links">
+      <div class="cta-link">
+        <div class="cta-icon">📄</div>
+        <div>
+          <div class="cta-lbl">Full deep dive — architecture, entropy patching, benchmarks</div>
+          <div class="cta-url">harshvardhanraju.github.io/posts/byte-latent-transformer.html</div>
+        </div>
+      </div>
+      <div class="cta-link">
+        <div class="cta-icon">🗺</div>
+        <div>
+          <div class="cta-lbl">State of Tokenizers in 2026 — all labs compared</div>
+          <div class="cta-url">harshvardhanraju.github.io/posts/tokenizer-landscape-2026.html</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">8 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+</body>
+</html>

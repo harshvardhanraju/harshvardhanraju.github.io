@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gemini 256K Tokenizer — LinkedIn Carousel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:     #0f0f17;
+      --bg2:    #16162a;
+      --bg3:    #1e1e35;
+      --accent: #8b5cf6;
+      --cyan:   #06b6d4;
+      --green:  #10b981;
+      --yellow: #f59e0b;
+      --red:    #ef4444;
+      --orange: #f97316;
+      --text:   #f1f5f9;
+      --text2:  #94a3b8;
+      --text3:  #475569;
+      --mono:   'JetBrains Mono', monospace;
+      --sans:   'Inter', sans-serif;
+      --slide:  1080px;
+    }
+    html, body { background: #1a1a2e; }
+    .print-hint {
+      font-family: var(--sans); background: #1e293b; color: #94a3b8;
+      padding: 1rem 2rem; font-size: 0.9rem; text-align: center;
+      border-bottom: 1px solid #334155;
+    }
+    .print-hint strong { color: #f1f5f9; }
+    .print-hint code { background: #0f172a; padding: 0.1rem 0.4rem; border-radius: 4px; font-family: monospace; }
+    .slide {
+      width: var(--slide); height: var(--slide);
+      background: var(--bg); font-family: var(--sans); color: var(--text);
+      position: relative; overflow: hidden; margin: 0 auto 4px;
+      display: flex; flex-direction: column;
+    }
+    .slide::before {
+      content: ''; position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(6,182,212,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(6,182,212,0.03) 1px, transparent 1px);
+      background-size: 54px 54px; pointer-events: none;
+    }
+    .slide-num { position: absolute; bottom: 36px; right: 48px; font-family: var(--mono); font-size: 0.78rem; color: var(--text3); }
+    .brand     { position: absolute; bottom: 36px; left: 48px; font-family: var(--mono); font-size: 0.75rem; color: var(--text3); }
+    .brand span { color: var(--cyan); }
+    .top-bar { position: absolute; top: 0; left: 0; right: 0; height: 5px; background: linear-gradient(90deg, var(--cyan), var(--green)); }
+
+    .s { position: relative; z-index: 1; padding: 64px 72px; display: flex; flex-direction: column; height: 100%; }
+    .s-tag  { font-family: var(--mono); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cyan); margin-bottom: 18px; }
+    .s-head { font-size: 2.7rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 28px; }
+    .hl  { color: var(--cyan); }
+    .hl2 { color: var(--green); }
+    .hl3 { color: var(--yellow); }
+
+    /* cover */
+    .cover-inner { position: relative; z-index: 1; padding: 80px; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+    .cover-eyebrow { font-family: var(--mono); font-size: 0.9rem; color: var(--cyan); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 28px; }
+    .cover-title { font-size: 4.6rem; font-weight: 900; line-height: 1.0; letter-spacing: -0.03em; margin-bottom: 28px; }
+    .cover-sub   { font-size: 1.35rem; color: var(--text2); max-width: 700px; line-height: 1.5; margin-bottom: 44px; }
+    .cover-claim { background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.3); border-left: 4px solid var(--cyan); border-radius: 8px; padding: 18px 26px; font-size: 1.05rem; color: var(--text); line-height: 1.6; max-width: 700px; }
+    .cover-claim strong { color: var(--cyan); }
+
+    /* vocab bar */
+    .vbar-rows { display: flex; flex-direction: column; gap: 15px; flex: 1; }
+    .vbar-row { display: flex; align-items: center; gap: 14px; }
+    .vbar-label { font-family: var(--mono); font-size: 0.8rem; color: var(--text2); width: 155px; flex-shrink: 0; text-align: right; }
+    .vbar-track { flex: 1; height: 36px; background: rgba(255,255,255,0.04); border-radius: 6px; overflow: hidden; }
+    .vbar-fill  { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-family: var(--mono); font-size: 0.82rem; font-weight: 700; }
+    .vbar-note  { font-size: 0.75rem; width: 180px; flex-shrink: 0; }
+
+    /* unigram steps */
+    .steps { background: var(--bg2); border: 1px solid rgba(6,182,212,0.15); border-radius: 10px; padding: 22px 26px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+    .step-n { background: rgba(6,182,212,0.15); border: 1px solid rgba(6,182,212,0.3); color: #67e8f9; font-family: var(--mono); font-size: 0.78rem; font-weight: 700; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+    .step-t { font-size: 0.9rem; color: var(--text2); line-height: 1.6; }
+    .step-t strong { color: var(--text); }
+
+    /* split digit */
+    .sd-rows { display: flex; flex-direction: column; gap: 18px; margin-bottom: 24px; }
+    .sd-row { display: flex; align-items: center; gap: 16px; }
+    .sd-model { font-size: 0.82rem; color: var(--text3); width: 120px; flex-shrink: 0; }
+    .tc-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+    .tc { font-family: var(--mono); font-size: 0.9rem; padding: 6px 12px; border-radius: 6px; font-weight: 700; }
+    .tc-bad  { background: rgba(239,68,68,0.12); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+    .tc-warn { background: rgba(245,158,11,0.1); color: #fcd34d; border: 1px solid rgba(245,158,11,0.2); }
+    .tc-ok   { background: rgba(16,185,129,0.1); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.2); }
+    .sd-note { font-size: 0.78rem; color: var(--text3); flex: 1; }
+
+    /* compare */
+    .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; flex: 1; }
+    .cmp-card { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 10px; padding: 22px; }
+    .cmp-title { font-weight: 700; font-size: 1.0rem; margin-bottom: 14px; }
+    .cmp-row { display: flex; justify-content: space-between; font-size: 0.83rem; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .cmp-row:last-child { border-bottom: none; }
+    .cmp-k { color: var(--text3); }
+    .cmp-v { font-family: var(--mono); font-size: 0.8rem; }
+
+    /* stat row */
+    .stat-row { display: flex; gap: 14px; margin: 18px 0; }
+    .stat-pill { background: var(--bg3); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 14px 18px; flex: 1; }
+    .sp-l { font-size: 0.72rem; color: var(--text3); font-family: var(--mono); margin-bottom: 4px; }
+    .sp-v { font-size: 1.15rem; font-weight: 700; color: var(--cyan); }
+
+    /* insight */
+    .insight { background: rgba(6,182,212,0.07); border: 1px solid rgba(6,182,212,0.2); border-left: 4px solid var(--cyan); border-radius: 8px; padding: 18px 22px; font-size: 0.9rem; color: var(--text2); line-height: 1.6; }
+    .insight strong { color: var(--text); }
+
+    /* lang grid */
+    .lang-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+    .lang-card { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; padding: 14px; text-align: center; }
+    .lang-name { font-size: 0.85rem; font-weight: 700; margin-bottom: 4px; }
+    .lang-val  { font-family: var(--mono); font-size: 1.1rem; font-weight: 700; }
+    .lang-note { font-size: 0.7rem; color: var(--text3); margin-top: 4px; }
+
+    /* embed cost */
+    .ecb-rows { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+    .ecb-row { display: flex; align-items: center; gap: 14px; }
+    .ecb-label { font-size: 0.8rem; color: var(--text2); width: 130px; flex-shrink: 0; }
+    .ecb-track { flex: 1; height: 34px; background: rgba(255,255,255,0.04); border-radius: 6px; overflow: hidden; }
+    .ecb-fill  { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-family: var(--mono); font-size: 0.8rem; font-weight: 700; }
+    .ecb-note  { font-size: 0.75rem; width: 130px; flex-shrink: 0; }
+
+    /* cta */
+    .cta-inner { position: relative; z-index:1; padding: 72px 80px 100px; display: flex; flex-direction: column; justify-content: center; height: 100%; }
+    .cta-title { font-size: 3.4rem; font-weight: 900; line-height: 1.1; letter-spacing: -0.025em; margin-bottom: 32px; }
+    .cta-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 34px; }
+    .cta-stat  { background: var(--bg2); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; padding: 14px; text-align: center; }
+    .cs-val    { font-family: var(--mono); font-size: 1.3rem; font-weight: 700; color: var(--cyan); }
+    .cs-lbl    { font-size: 0.7rem; color: var(--text3); margin-top: 4px; line-height: 1.3; }
+    .cta-links { display: flex; flex-direction: column; gap: 14px; }
+    .cta-link  { display: flex; align-items: center; gap: 14px; }
+    .cta-icon  { width: 36px; height: 36px; background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.25); border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .cta-url   { font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); }
+    .cta-lbl   { font-size: 0.9rem; color: var(--text2); }
+
+    @page { size: 1080px 1080px; margin: 0; }
+    @media print {
+      .print-hint { display: none; }
+      html, body { background: var(--bg); width: 1080px; }
+      .slide { width: 1080px !important; height: 1080px !important; page-break-after: always; break-after: page; margin: 0; overflow: hidden; }
+      .slide:last-child { page-break-after: avoid; break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="print-hint">
+  <strong>Export to PDF for LinkedIn:</strong>
+  Open in <strong>Google Chrome</strong> → <code>Cmd + P</code> → Save as PDF → Uncheck "Headers and footers" → Save.
+  Upload to LinkedIn as a <strong>Document post</strong>.
+  &nbsp;|&nbsp; <a href="gemini-tokenizer.html" style="color:#06b6d4;">Read full article ↗</a>
+</div>
+
+<!-- SLIDE 1: COVER -->
+<div class="slide">
+  <div class="top-bar"></div>
+  <div class="cover-inner">
+    <div class="cover-eyebrow">Google · Gemini · Deep Dive</div>
+    <div class="cover-title"><span class="hl">256K</span><br>Tokens.<br>Fixed <span class="hl2">Arithmetic.</span></div>
+    <div class="cover-sub">How Google engineered the most carefully designed tokenizer in production — and why every decision has a specific problem it's solving</div>
+    <div class="cover-claim">
+      <strong>Four decisions. Four failure modes fixed.</strong><br>
+      256K vocab · Unigram LM · Split-digit tokenization · Byte fallback.
+      Each one accepted a cost upfront rather than push the problem into the model.
+    </div>
+  </div>
+  <div class="slide-num">1 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 2: THE VOCABULARY SIZE DECISION -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Decision 1 · Vocabulary Size</div>
+    <div class="s-head">Why <span class="hl">256K</span> tokens?</div>
+    <div class="vbar-rows">
+      <div class="vbar-row">
+        <div class="vbar-label">LLaMA 2 · 32K</div>
+        <div class="vbar-track"><div class="vbar-fill" style="width:12.5%;background:linear-gradient(90deg,#334155,#475569);color:#94a3b8;">131M params</div></div>
+        <div class="vbar-note" style="color:var(--red);">Arabic → 4 tokens/word</div>
+      </div>
+      <div class="vbar-row">
+        <div class="vbar-label">GPT-4 · 100K</div>
+        <div class="vbar-track"><div class="vbar-fill" style="width:39%;background:linear-gradient(90deg,#6d28d9,#7c3aed);color:#ddd6fe;">410M params</div></div>
+        <div class="vbar-note" style="color:var(--yellow);">better but CJK still high</div>
+      </div>
+      <div class="vbar-row">
+        <div class="vbar-label">LLaMA 3 · 128K</div>
+        <div class="vbar-track"><div class="vbar-fill" style="width:50%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);color:#ede9fe;">524M params</div></div>
+        <div class="vbar-note" style="color:var(--accent);">+1B total vs LLaMA 2</div>
+      </div>
+      <div class="vbar-row">
+        <div class="vbar-label">GPT-4o · 200K</div>
+        <div class="vbar-track"><div class="vbar-fill" style="width:78%;background:linear-gradient(90deg,#0891b2,#06b6d4);color:#cffafe;">819M params</div></div>
+        <div class="vbar-note" style="color:var(--cyan);">−40% CJK token tax</div>
+      </div>
+      <div class="vbar-row">
+        <div class="vbar-label">Gemini · 256K</div>
+        <div class="vbar-track"><div class="vbar-fill" style="width:100%;background:linear-gradient(90deg,#059669,#10b981);color:#d1fae5;">1.05B params</div></div>
+        <div class="vbar-note" style="color:var(--green);">100+ languages covered</div>
+      </div>
+    </div>
+    <div class="insight" style="margin-top:18px;">
+      At 256K, you have enough vocabulary budget that <strong>common words in every major script</strong> get dedicated tokens.
+      The token tax drops from 3–4× to near parity for most non-English languages.
+    </div>
+  </div>
+  <div class="slide-num">2 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 3: UNIGRAM LM VS BPE -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Decision 2 · Algorithm</div>
+    <div class="s-head">Unigram LM, <span class="hl">not</span> BPE</div>
+    <div class="cmp-grid" style="margin-bottom:20px;">
+      <div class="cmp-card" style="border-top:3px solid var(--accent);">
+        <div class="cmp-title" style="color:var(--accent)">BPE (OpenAI · Meta · Qwen)</div>
+        <div class="cmp-row"><span class="cmp-k">Direction</span><span class="cmp-v">Merge up from chars</span></div>
+        <div class="cmp-row"><span class="cmp-k">Criterion</span><span class="cmp-v">Pair frequency</span></div>
+        <div class="cmp-row"><span class="cmp-k">Objective</span><span class="cmp-v">Greedy heuristic</span></div>
+        <div class="cmp-row"><span class="cmp-k">Tokenization</span><span class="cmp-v">Deterministic only</span></div>
+        <div class="cmp-row"><span class="cmp-k">Bias</span><span class="cmp-v">High-freq lang wins vocab</span></div>
+      </div>
+      <div class="cmp-card" style="border-top:3px solid var(--cyan);">
+        <div class="cmp-title" style="color:var(--cyan)">Unigram LM (Google)</div>
+        <div class="cmp-row"><span class="cmp-k">Direction</span><span class="cmp-v">Prune down from large vocab</span></div>
+        <div class="cmp-row"><span class="cmp-k">Criterion</span><span class="cmp-v">Min log-likelihood loss</span></div>
+        <div class="cmp-row"><span class="cmp-k">Objective</span><span class="cmp-v">Proper probabilistic</span></div>
+        <div class="cmp-row"><span class="cmp-k">Tokenization</span><span class="cmp-v">Probabilistic (sampling)</span></div>
+        <div class="cmp-row"><span class="cmp-k">Bias</span><span class="cmp-v">Principled coverage</span></div>
+      </div>
+    </div>
+    <div class="insight">
+      Unigram LM's pruning keeps tokens that are <strong>essential for encoding the corpus</strong> — not just frequent ones.
+      A rare Telugu morpheme that appears in many word forms stays in the vocab because removing it hurts Telugu
+      log-likelihood, even if it barely affects English. BPE can't make this distinction.
+    </div>
+  </div>
+  <div class="slide-num">3 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 4: SPLIT DIGIT -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Decision 3 · Arithmetic Fix</div>
+    <div class="s-head">One token <span class="hl2">per digit,</span> always</div>
+    <div class="sd-rows">
+      <div class="sd-row">
+        <div class="sd-model">GPT-4 (cl100k)</div>
+        <div class="tc-chips">
+          <span class="tc tc-bad">127</span><span class="tc tc-bad">84</span><span class="tc tc-bad">9</span>
+        </div>
+        <div class="sd-note">— scrambled place values, no consistent structure</div>
+      </div>
+      <div class="sd-row">
+        <div class="sd-model">Same number, same model, different context</div>
+        <div class="tc-chips">
+          <span class="tc tc-bad">12</span><span class="tc tc-bad">7849</span>
+        </div>
+        <div class="sd-note">— different split of identical number</div>
+      </div>
+      <div class="sd-row">
+        <div class="sd-model">LLaMA 3 (128K)</div>
+        <div class="tc-chips">
+          <span class="tc tc-warn">12</span><span class="tc tc-warn">78</span><span class="tc tc-warn">49</span>
+        </div>
+        <div class="sd-note">— larger vocab, same fundamental problem</div>
+      </div>
+      <div class="sd-row">
+        <div class="sd-model">Gemini (256K)</div>
+        <div class="tc-chips">
+          <span class="tc tc-ok">1</span><span class="tc tc-ok">2</span><span class="tc tc-ok">7</span><span class="tc tc-ok">8</span><span class="tc tc-ok">4</span><span class="tc tc-ok">9</span>
+        </div>
+        <div class="sd-note" style="color:var(--green);">— one token per digit, place value is consistent</div>
+      </div>
+    </div>
+    <div class="insight">
+      Split-digit doesn't make arithmetic easier — it makes it <strong>possible</strong>.
+      The model can now learn that "position N+2 from the start of a number = hundreds place"
+      because that relationship is stable. With BPE merges it's random.
+    </div>
+  </div>
+  <div class="slide-num">4 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 5: BYTE FALLBACK + SENTENCEPIECE -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">Decision 4 · Completeness</div>
+    <div class="s-head">Zero <span class="hl2">unknown</span> tokens — ever</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px;">
+      <div style="background:var(--bg2);border:1px solid rgba(239,68,68,0.2);border-top:3px solid var(--red);border-radius:10px;padding:22px;">
+        <div style="font-weight:700;margin-bottom:12px;color:var(--red);">Without byte fallback</div>
+        <div style="font-size:0.85rem;color:var(--text2);line-height:1.6;">
+          Novel Unicode characters → [UNK] token.<br>
+          OCR errors → [UNK].<br>
+          Rare scripts → [UNK].<br>
+          <br>
+          Model loses all information. No recovery.
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid rgba(16,185,129,0.2);border-top:3px solid var(--green);border-radius:10px;padding:22px;">
+        <div style="font-weight:700;margin-bottom:12px;color:var(--green);">Gemini: byte_fallback=True</div>
+        <div style="font-size:0.85rem;color:var(--text2);line-height:1.6;">
+          Every byte sequence representable.<br>
+          Novel scripts → individual byte tokens.<br>
+          Garbled input → bytes, not garbage.<br>
+          <br>
+          256 byte tokens always available.
+        </div>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 22px;margin-bottom:16px;">
+      <div style="font-family:var(--mono);font-size:0.78rem;color:var(--text3);margin-bottom:8px;">SentencePiece training config (key flags)</div>
+      <div style="font-family:var(--mono);font-size:0.82rem;color:var(--cyan);line-height:1.8;">
+        model_type=<span style="color:#f1f5f9;">'unigram'</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text3);"># not BPE</span><br>
+        vocab_size=<span style="color:#f1f5f9;">256000</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text3);"># largest in production</span><br>
+        split_digits=<span style="color:#f1f5f9;">True</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text3);"># arithmetic fix</span><br>
+        byte_fallback=<span style="color:#f1f5f9;">True</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--text3);"># zero UNK tokens</span>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">5 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 6: MULTILINGUAL RESULT -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">The Result · Token Tax</div>
+    <div class="s-head">100+ languages, <span class="hl2">near parity</span></div>
+    <div class="lang-grid">
+      <div class="lang-card">
+        <div class="lang-name">English</div>
+        <div class="lang-val" style="color:var(--green)">1.0×</div>
+        <div class="lang-note">baseline</div>
+      </div>
+      <div class="lang-card">
+        <div class="lang-name">Chinese</div>
+        <div class="lang-val" style="color:var(--green)">~1.1×</div>
+        <div class="lang-note">256K gives full CJK coverage</div>
+      </div>
+      <div class="lang-card">
+        <div class="lang-name">Hindi</div>
+        <div class="lang-val" style="color:var(--yellow)">~1.3×</div>
+        <div class="lang-note">was 1.7× at 100K</div>
+      </div>
+      <div class="lang-card">
+        <div class="lang-name">Arabic</div>
+        <div class="lang-val" style="color:var(--yellow)">~1.5×</div>
+        <div class="lang-note">was 3.3× at 100K</div>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:20px 24px;margin-bottom:20px;">
+      <div style="font-size:0.78rem;font-family:var(--mono);color:var(--text3);margin-bottom:14px;">Context window: same tokens = very different content</div>
+      <div style="display:flex;gap:16px;">
+        <div style="flex:1;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:14px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:700;color:var(--green);">30,000</div>
+          <div style="font-size:0.78rem;color:var(--text3);margin-top:4px;">English words<br>in 128K context</div>
+        </div>
+        <div style="flex:1;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;padding:14px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:700;color:var(--red);">8,000</div>
+          <div style="font-size:0.78rem;color:var(--text3);margin-top:4px;">Arabic words<br>same context (cl100k)</div>
+        </div>
+        <div style="flex:1;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:14px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:1.6rem;font-weight:700;color:var(--green);">~22,000</div>
+          <div style="font-size:0.78rem;color:var(--text3);margin-top:4px;">Arabic words<br>same context (Gemini)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">6 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 7: ONE TOKENIZER, ENTIRE FAMILY -->
+<div class="slide">
+  <div class="s">
+    <div class="s-tag">The Deployment Decision</div>
+    <div class="s-head">One vocab. <span class="hl">Every</span> Google model.</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:24px;">
+      <div style="background:var(--bg2);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:20px;">
+        <div style="font-weight:700;color:var(--cyan);margin-bottom:8px;">Gemma 2</div>
+        <div style="font-size:0.82rem;color:var(--text2);">Same 256K tokenizer. Same vocab IDs.</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:20px;">
+        <div style="font-weight:700;color:var(--cyan);margin-bottom:8px;">Gemma 3</div>
+        <div style="font-size:0.82rem;color:var(--text2);">Same 256K tokenizer. Same vocab IDs.</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:20px;">
+        <div style="font-weight:700;color:var(--cyan);margin-bottom:8px;">Gemini 1.5</div>
+        <div style="font-size:0.82rem;color:var(--text2);">Same 256K tokenizer. Same vocab IDs.</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid rgba(6,182,212,0.2);border-radius:10px;padding:20px;">
+        <div style="font-weight:700;color:var(--cyan);margin-bottom:8px;">Gemini 2.0</div>
+        <div style="font-size:0.82rem;color:var(--text2);">Same 256K tokenizer. Same vocab IDs.</div>
+      </div>
+    </div>
+    <div class="insight">
+      <strong>Why lock it?</strong> Every tokenizer change breaks fine-tunes, embeddings, RLHF pipelines, and retrieval systems.
+      256K front-loads the vocabulary budget so you never <em>need</em> to change it.
+      Meta learned this the hard way — LLaMA 2→3 tokenizer change forced a full ecosystem rebuild.
+    </div>
+    <div class="stat-row">
+      <div class="stat-pill"><div class="sp-l">Languages</div><div class="sp-v">100+</div></div>
+      <div class="stat-pill"><div class="sp-l">Unknown tokens</div><div class="sp-v" style="color:var(--green);">Zero</div></div>
+      <div class="stat-pill"><div class="sp-l">Locked since</div><div class="sp-v">Gemma 2</div></div>
+    </div>
+  </div>
+  <div class="slide-num">7 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+<!-- SLIDE 8: CTA -->
+<div class="slide">
+  <div class="top-bar"></div>
+  <div class="cta-inner">
+    <div style="font-family:var(--mono);font-size:0.8rem;color:var(--text3);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:22px;">Deep Dive · harsha.dev</div>
+    <div class="cta-title">Four decisions.<br>Four <span class="hl">failure modes</span> fixed.</div>
+    <div class="cta-stats">
+      <div class="cta-stat"><div class="cs-val">256K</div><div class="cs-lbl">vocabulary tokens</div></div>
+      <div class="cta-stat"><div class="cs-val" style="color:var(--green);">100+</div><div class="cs-lbl">languages covered</div></div>
+      <div class="cta-stat"><div class="cs-val" style="color:var(--green);">0</div><div class="cs-lbl">unknown tokens ever</div></div>
+      <div class="cta-stat"><div class="cs-val" style="color:var(--yellow);">1B+</div><div class="cs-lbl">embed params, upfront</div></div>
+    </div>
+    <div class="cta-links">
+      <div class="cta-link">
+        <div class="cta-icon">📄</div>
+        <div>
+          <div class="cta-lbl">Full deep dive — Unigram LM, split-digit, SentencePiece internals</div>
+          <div class="cta-url">harshvardhanraju.github.io/posts/gemini-tokenizer.html</div>
+        </div>
+      </div>
+      <div class="cta-link">
+        <div class="cta-icon">🗺</div>
+        <div>
+          <div class="cta-lbl">State of Tokenizers in 2026 — all labs compared</div>
+          <div class="cta-url">harshvardhanraju.github.io/posts/tokenizer-landscape-2026.html</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">8 / 8</div>
+  <div class="brand">harsha<span>.</span>dev</div>
+</div>
+
+</body>
+</html>
