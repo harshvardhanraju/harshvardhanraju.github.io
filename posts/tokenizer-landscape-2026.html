@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The State of Tokenizers in 2026 — From BPE to Byte Latent Transformers · Harsha Raju</title>
+  <meta name="description" content="A research review of how the field's fundamental text-preprocessing step has evolved — from 32K-token vocabularies to 256K, from greedy merges to NP-completeness proofs, and from subwords to raw bytes." />
+  <meta property="og:title" content="The State of Tokenizers in 2026 — From BPE to Byte Latent Transformers" />
+  <meta property="og:description" content="Every major lab quietly doubled or quadrupled their tokenizer vocabulary this year. Here's why, what changed, and where it's going." />
+  <meta property="og:url" content="https://harshvardhanraju.github.io/posts/tokenizer-landscape-2026.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-ml">NLP</span>
+        <span class="tag tag-viz">Research Review</span>
+        <span class="tag tag-era">2026</span>
+      </div>
+      <h1 class="post-heading">The State of Tokenizers in 2026 — From BPE to Byte Latent Transformers</h1>
+      <div class="post-header-meta">
+        <span>📅 16 Jul 2026</span>
+        <span>⏱ 18 min read</span>
+        <span><a href="https://github.com/harshvardhanraju/ERAv5/tree/main/ses2" target="_blank">Related code ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Tokenization is the part of an LLM nobody talks about — until they realize it's why Arabic API calls cost 3× more than English ones,
+        why GPT-4 fails at multi-digit arithmetic, and why LLaMA 3 needed a billion extra parameters before a single transformer layer.
+        This is a research review of where the field is now, what every major lab changed, and what's coming next.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <p>
+        After building a multilingual BPE tokenizer from scratch for ERA v5 coursework — achieving a compression spread of 0.034
+        across English, Hindi, Telugu, and Bengali — I went down the rabbit hole of what the rest of the field is actually doing.
+        What I found was a field quietly in the middle of a major architectural rethink.
+      </p>
+
+      <p>
+        Every major lab doubled or quadrupled their vocabulary in the last 18 months.
+        Meta rewrote their tokenizer entirely between LLaMA 2 and LLaMA 3. Google committed to 256,000 tokens.
+        Researchers at ACL 2025 proved that optimal tokenization is NP-complete.
+        And Meta published a byte-level model that matches tokenized LLMs at fixed compute cost — the first credible result
+        that suggests subword tokenization may not be a permanent fixture of the architecture.
+      </p>
+
+      <p>
+        Here's what the landscape looks like.
+      </p>
+
+      <!-- ===== 01: Algorithm Zoo ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">01</span>
+          <span class="exp-card-title">Four Algorithms, All in Production</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The map:</strong> BPE, WordPiece, and Unigram LM are all live in major models right now.
+            They look similar from the outside but make fundamentally different choices about what to merge.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        <strong>BPE (Byte Pair Encoding)</strong> is the workhorse. Sennrich et al. adapted it from data compression in 2016.
+        Start with individual characters. Find the most frequent adjacent pair across your training corpus. Merge it into a new token.
+        Repeat until you hit your vocabulary size. Used by GPT-4o, LLaMA 3, Qwen, DeepSeek, and Mistral.
+      </p>
+
+      <p>
+        <strong>WordPiece</strong> modifies the merge criterion: instead of merging the most <em>frequent</em> pair, it merges
+        the pair with the highest pointwise mutual information — co-occurrence relative to chance. <code>score(A,B) = freq(AB) / (freq(A) × freq(B))</code>.
+        This tends to produce more linguistically coherent subwords. Used by BERT, DistilBERT, and older Google models.
+        Largely superseded in new work by larger-vocabulary BPE.
+      </p>
+
+      <p>
+        <strong>Unigram Language Model</strong> runs the algorithm in reverse: start with a huge over-complete vocabulary,
+        then iteratively prune the token whose removal hurts corpus likelihood the least. Keep pruning until you hit your target size.
+        This has a proper objective function (maximizing log-likelihood), supports probabilistic tokenization for training-time data augmentation,
+        and is language-agnostic by construction. Used by Google's T5, Gemma, Gemini, PaLM, and LLaMA 1/2.
+      </p>
+
+      <p>
+        <strong>SentencePiece</strong> is a framework, not an algorithm — it can run BPE or Unigram internally.
+        Its defining feature: it treats whitespace as a regular character (using ▁ as a marker), so it never
+        needs a pre-tokenization step that splits on spaces. This makes it genuinely language-agnostic by default —
+        crucial for languages like Chinese, Japanese, and Thai that have no word boundaries.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">BPE</span>
+          <span class="stat-pill-val" style="color: var(--accent)">GPT-4o · LLaMA 3 · Qwen</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Unigram LM</span>
+          <span class="stat-pill-val" style="color: var(--accent2)">Gemma · Gemini · T5</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">WordPiece</span>
+          <span class="stat-pill-val" style="color: var(--text2)">BERT · DistilBERT</span>
+        </div>
+      </div>
+
+      <!-- ===== 02: Vocabulary Race ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">02</span>
+          <span class="exp-card-title">The Vocabulary Size Race: 32K → 256K</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The trend:</strong> every major lab significantly expanded their vocabulary in 2024–2025.
+            The jump from 32K (LLaMA 2) to 128K (LLaMA 3) added roughly 1B parameters before a single transformer layer.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        A larger vocabulary is a direct compression bet. With 32K tokens, common 5-character Chinese phrases split into
+        3–4 tokens because the budget ran out of Chinese entries. With 256K tokens, those phrases get dedicated slots.
+        Fewer tokens per sentence = shorter sequences = less attention compute = more effective context window.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">GPT-2 (2019)</span>
+          <span class="stat-pill-val" style="color: var(--text2)">50K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">LLaMA 1/2 (2023)</span>
+          <span class="stat-pill-val" style="color: var(--text2)">32K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">GPT-4 (2023)</span>
+          <span class="stat-pill-val" style="color: var(--accent2)">100K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">LLaMA 3 (2024)</span>
+          <span class="stat-pill-val" style="color: var(--accent)">128K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Qwen 2/3</span>
+          <span class="stat-pill-val" style="color: var(--accent)">152K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">GPT-4o (2024)</span>
+          <span class="stat-pill-val" style="color: var(--accent)">200K</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Gemma/Gemini</span>
+          <span class="stat-pill-val" style="color: var(--green)">256K</span>
+        </div>
+      </div>
+
+      <p>
+        The tradeoff is real. Embedding tables scale as <code>vocab_size × embedding_dim</code>. At 4096 dimensions,
+        a 256K vocabulary requires 1.05B parameters just for embeddings — roughly 15% of a 7B model's parameters
+        dedicated to the lookup table before any computation happens.
+        The LLaMA 2→3 jump from 7B to 8B parameters is almost entirely explained by the vocabulary expansion from 32K to 128K.
+      </p>
+
+      <p>
+        Google's bet with Gemma/Gemini is the largest: 256K tokens shared across the entire model family.
+        The Gemma 3 Technical Report (March 2025) confirms this design was specifically chosen to reduce over-tokenization
+        of non-English text across 100+ supported languages.
+      </p>
+
+      <div class="box box-insight">
+        <strong>A bug that came with the expansion:</strong> Researcher Sander Land found that the GPT-4o (o200k_base)
+        vocabulary contains tokens that are literally unreachable — they appear in the vocabulary dictionary but no
+        sequence of bytes can produce them through the BPE merge rules. Artifacts of how the vocabulary was constructed.
+        These dead tokens consume embedding slots and model capacity for nothing.
+      </div>
+
+      <!-- ===== 03: What Each Lab Did ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">03</span>
+          <span class="exp-card-title">What Each Major Lab Actually Changed</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The pattern:</strong> every lab made a different bet. OpenAI doubled vocabulary. Meta rewrote the
+            tokenizer entirely. Google committed to 256K with Unigram. Chinese labs extended existing vocabularies
+            rather than building from scratch.
+          </div>
+        </div>
+      </div>
+
+      <h3>OpenAI: cl100k_base → o200k_base</h3>
+      <p>
+        The most impactful change: GPT-4o's tokenizer (May 2024) halved the token count for CJK text compared to GPT-4.
+        The 200K vocabulary gives Chinese, Japanese, and Korean characters enough budget that common multi-character
+        phrases become single tokens rather than character-by-character sequences.
+        Independent measurement confirmed approximately 40% fewer tokens for CJK text with o200k_base.
+      </p>
+      <p>
+        The pre-tokenization regex also changed — the pattern that splits raw text before BPE merges begin now handles
+        runs of spaces, digit sequences, and mixed-script text more gracefully.
+        This matters especially for code (indentation, numeric literals) and multilingual documents.
+      </p>
+
+      <h3>Meta: LLaMA 2 → LLaMA 3 (the complete rewrite)</h3>
+      <p>
+        The most dramatic change. LLaMA 2 used SentencePiece with a 32K vocabulary.
+        LLaMA 3 switched to tiktoken-style BPE with 128,256 tokens — a 4× jump — and produced approximately 15%
+        fewer tokens for the same text. The switch also broke the SentencePiece API that many downstream pipelines
+        had been built around, requiring migrations across the ecosystem.
+        Meta locked the LLaMA 3 tokenizer unchanged through the 3.1, 3.2, and 3.3 series.
+      </p>
+
+      <h3>Google: Gemma/Gemini (256K + split digits)</h3>
+      <p>
+        Two decisions stand out. First: 256K vocabulary, the largest in production. Second: <strong>split-digit tokenization</strong> —
+        every number is tokenized as individual digits. <code>123</code> always becomes <code>[1, 2, 3]</code>, never
+        <code>[12, 3]</code> or <code>[123]</code>. This is a direct architectural fix for the arithmetic failure problem
+        (more on this below). No other major production tokenizer does this consistently.
+      </p>
+
+      <h3>Anthropic: No public information</h3>
+      <p>
+        Anthropic has never published tokenizer details. No technical report, no vocabulary size, no algorithm disclosure.
+        Empirical measurement via the API can infer token counts but not the underlying design. This is unusual —
+        every other major lab has at least a technical report section on their tokenizer.
+      </p>
+
+      <!-- ===== 04: Chinese Labs ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">04</span>
+          <span class="exp-card-title">What Chinese Labs Are Doing Differently</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The strategy:</strong> extend rather than rebuild. Qwen starts from OpenAI's cl100k_base and augments it.
+            DeepSeek mirrors LLaMA 3 at 128K. Both avoid reinventing the English/code tokenization wheel.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        <strong>Qwen (Alibaba)</strong> takes the most pragmatic approach: start with OpenAI's cl100k_base vocabulary
+        (100K tokens), then augment it with the most frequent Chinese characters and words that were underrepresented.
+        Final size: 151,936 tokens. The cl100k_base already handles English, code, and general multilingual patterns well.
+        By extending rather than replacing, Qwen preserves compatibility with tiktoken tooling while specifically
+        targeting the Chinese coverage gap. Qwen 2.5 claims support for 29+ languages with this approach.
+      </p>
+
+      <p>
+        <strong>DeepSeek</strong> tracked different use cases with different vocabularies:
+      </p>
+      <ul>
+        <li><strong>DeepSeek-Coder</strong> (code specialist): 32K vocabulary trained on 87% code data. Smaller vocabulary is fine for code — the domain is more constrained.</li>
+        <li><strong>DeepSeek-V3</strong> (general purpose): 128K vocabulary, LLaMA-3-compatible. When they needed multilingual coverage, they adopted the new standard.</li>
+      </ul>
+
+      <p>
+        Chinese research labs are also pushing on something more fundamental: <strong>sub-character tokenization</strong> for
+        Chinese text. Chinese characters are not atomic — they decompose into radicals (semantic/phonetic components).
+        The character 語 (language) shares the radical 言 (speech) with 話 (speech/words) and dozens of other characters.
+        A tokenizer that understands radicals understands something about semantic structure that BPE, merging bytes
+        blindly, completely misses. Work from Chinese NLP labs (TACL 2024, MDPI 2025) shows that incorporating radical
+        information improves representation quality, though the approach requires structured knowledge about character
+        decomposition that makes it harder to apply beyond Chinese.
+      </p>
+
+      <!-- ===== 05: Byte-level future ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">05</span>
+          <span class="exp-card-title">The Byte-Level Future: BLT, MrT5, and the End of Vocabulary</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The result:</strong> Meta's Byte Latent Transformer (ACL 2025) matches tokenized LLMs at fixed compute cost
+            at 8B parameters / 4 trillion bytes. The question is no longer "can it work?" but "when is it worth deploying?"
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The motivation for going byte-level is compelling: subword tokenizers bake in English-centric assumptions,
+        create arbitrary vocabulary boundaries that hurt morphologically rich languages, and produce inconsistent
+        tokenizations for the same semantic content depending on surrounding context.
+        Bytes are universal — every language, code file, and data format is just a byte sequence.
+      </p>
+
+      <p>
+        The challenge has always been sequence length. Byte sequences are 4–6× longer than token sequences for the same text.
+        Standard Transformer attention scales as O(n²) with sequence length. A byte-level model processing English text
+        needs 4–6× longer sequences, which means 16–36× more compute for attention. This killed early byte-level work.
+      </p>
+
+      <p>
+        Three architectures have now credibly solved this at different scales:
+      </p>
+
+      <h3>MrT5 — learned deletion (Stanford/USC, ICLR 2025)</h3>
+      <p>
+        MrT5 augments ByT5's encoder with a learned "delete gate." After several encoder layers, the model decides
+        which tokens carry redundant information and removes them — progressively compressing the byte sequence through
+        the encoder stack. By the final layers, the sequence is at 20% of its original length: byte-level input,
+        token-level processing cost. The deletion pattern emerges from training without supervision and is multilingual —
+        different languages are compressed at different rates based on their orthographic structure.
+        Up to 80% sequence length reduction while matching ByT5 accuracy.
+      </p>
+
+      <h3>Byte Latent Transformer — entropy-based dynamic patching (Meta AI, ACL 2025)</h3>
+      <p>
+        BLT is the most important result. Instead of learning to delete, it uses <strong>entropy-based dynamic patching</strong>:
+        a small local model estimates the entropy of the next byte at every position. Patch boundaries are placed
+        where entropy is high (the model is uncertain — genuinely complex text). Easy text (predictable English words,
+        repetitive boilerplate, common code) gets long patches and little compute. Hard text (rare words, non-Latin scripts,
+        complex code logic) gets short patches and more attention.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Model Scale</span>
+          <span class="stat-pill-val" style="color: var(--accent)">8B params</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Training Data</span>
+          <span class="stat-pill-val" style="color: var(--accent)">4T bytes</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">vs Tokenized LLM</span>
+          <span class="stat-pill-val" style="color: var(--green)">Matches at fixed FLOP</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Noise robustness</span>
+          <span class="stat-pill-val" style="color: var(--green)">Substantially better</span>
+        </div>
+      </div>
+
+      <p>
+        The fixed-FLOP comparison is key. Previous byte-level work showed "byte models can match tokenized models"
+        without controlling for compute — of course they can match if you give them more compute.
+        BLT controls for this and still matches. It also shows qualitative improvements: typos, OCR errors, unusual
+        encodings, and rare Unicode characters all degrade gracefully because there's no vocabulary to violate.
+      </p>
+
+      <div class="box box-insight">
+        <strong>BoundlessBPE (COLM 2025)</strong> takes an intermediate approach: relax BPE's constraint that merges
+        cannot cross whitespace boundaries. This allows tokens like <code>▁import▁</code> (with space), <code>▁def▁</code>,
+        and named entities like <code>▁New▁York</code> to become single tokens — a 15% improvement in bytes-per-token.
+        Cost: training takes 4.7 CPU-days on 1GB of text vs. 59 seconds for standard BPE. Research result, not yet production.
+      </div>
+
+      <!-- ===== 06: Token Tax ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">06</span>
+          <span class="exp-card-title">The Token Tax — Infrastructure-Level Language Inequality</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The problem:</strong> Arabic API calls cost 3.3× more than English. Bengali costs ~4.5× more.
+            This is purely a tokenizer artifact — the model quality is identical.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The "token tax" has been formalized in a growing body of research. With GPT-4's cl100k_base tokenizer:
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">English</span>
+          <span class="stat-pill-val" style="color: var(--green)">1.0×</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Spanish</span>
+          <span class="stat-pill-val" style="color: var(--yellow)">1.55×</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Japanese</span>
+          <span class="stat-pill-val" style="color: var(--red)">2.93×</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Arabic</span>
+          <span class="stat-pill-val" style="color: var(--red)">3.30×</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Bengali</span>
+          <span class="stat-pill-val" style="color: var(--red)">~4.5×</span>
+        </div>
+      </div>
+
+      <p>
+        This has a second effect beyond cost: the effective context window. A 128K-token context window holds roughly
+        30,000 English words but only 8,000–10,000 Arabic words, because each Arabic word consumes 3–4 tokens instead of one.
+        Non-English users are paying more per query and getting a fraction of the context window they're billed for.
+      </p>
+
+      <p>
+        GPT-4o's o200k_base reduced the CJK tax by approximately 40%. But Arabic, Bengali, Tamil, and most African
+        languages remain substantially penalized even with larger vocabularies, because the training data used to
+        construct those vocabularies is still English-dominated. The vocabulary budget gets allocated to where the
+        training data is most concentrated.
+      </p>
+
+      <p>
+        Recent research (arXiv 2025–2026) has proposed algorithmic fixes:
+      </p>
+      <ul>
+        <li><strong>Parity-Aware BPE</strong> (arXiv 2508.04796): modifies the BPE training objective to explicitly penalize imbalanced token costs across languages during vocabulary construction.</li>
+        <li><strong>MAGNET</strong> (arXiv 2407.08818): gradient-based tokenization that incorporates multilingual fairness constraints at training time.</li>
+        <li><strong>MYTE</strong> (ACL 2024, UW/AI2): replaces UTF-8 byte encoding with morpheme-based byte codes. Across 99 languages, MYTE encoding is shorter than UTF-8 for all of them — and the worst-case imbalance relative to English is 1.7× vs. 3.5× for plain UTF-8.</li>
+        <li><strong>Qtok</strong> (arXiv 2410.12989): open evaluation framework measuring fertility and coverage across 13 tokenizers and 58 models, quantifying systematic biases across linguistic categories.</li>
+      </ul>
+
+      <div class="box box-insight">
+        <strong>What this means for the ERA v5 multilingual assignment:</strong> the fertility spread metric used in the assignment
+        (score = 1000 / (max_fertility − min_fertility)) is measuring exactly the token tax across four languages.
+        Getting the spread from 0.154 (reference) to 0.034 (achieved) is a 4.3× improvement in multilingual equity —
+        the same thing "Parity-Aware BPE" is trying to bake into the training algorithm.
+        We did it through corpus balancing; they're trying to do it through objective function design.
+      </div>
+
+      <!-- ===== 07: Arithmetic & Code ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">07</span>
+          <span class="exp-card-title">Why LLMs Fail at Arithmetic (It's the Tokenizer)</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The root cause:</strong> multi-digit numbers tokenize into arbitrary chunks with no consistent place-value
+            structure. The model cannot "see" digits — it sees opaque numeric blobs.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        With GPT-4o's o200k_base tokenizer, the number <code>12345</code> might tokenize as <code>[123, 45]</code>
+        or <code>[12, 345]</code> or <code>[1, 2345]</code> depending on context. There is no consistent relationship
+        between token IDs and numeric values. The single-digit <code>'2'</code> is token 17.
+        The two-digit <code>'20'</code> is token 455. <code>'200'</code> is token 1179. <code>'201'</code> is token 667.
+        No pattern. No structure. No way for a model to learn place-value arithmetic from these representations.
+      </p>
+
+      <p>
+        A 2025 paper ("Tokenization Constraints in LLMs," arXiv 2505.14178) formally confirmed that arithmetic failure
+        rates scale with operand size and are directly attributable to tokenization artifacts, not to reasoning capability.
+        The model is not bad at math — it literally cannot see the digits.
+      </p>
+
+      <p>
+        Production workarounds range from clean (Google's split-digit tokenizer in Gemma) to messy (pre-processing
+        all numeric inputs to add spaces between digits, routing arithmetic to Python interpreters, using chain-of-thought
+        to reconstruct digit structure from patterns). The fact that "route all arithmetic to a Python interpreter"
+        is now standard engineering advice is a remarkable admission that the tokenizer is broken for an entire category of tasks.
+      </p>
+
+      <p>
+        Code tokenization has its own set of issues. Python indentation (4 spaces as semantic syntax) may collapse to a
+        single token, erasing nesting information. <code>getHTTPResponseCode</code> splits at arbitrary capitalization
+        boundaries rather than at conceptual word boundaries. Common code patterns like <code>import </code>, <code>-> </code>,
+        and <code>== </code> cross word boundaries and get split when they should be single tokens.
+        A 2024 paper ("Fishing for Magikarp") documented vocabulary entries that almost never appear in training data —
+        "undertrained tokens" whose embeddings are essentially random. These cause erratic model behavior when they
+        appear in prompts.
+      </p>
+
+      <!-- ===== 08: Morphological ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">08</span>
+          <span class="exp-card-title">Agglutinative Languages and the Morphology Problem</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The specific challenge:</strong> in Turkish or Finnish, a single surface form can encode a complete sentence's worth of meaning.
+            BPE splits these suffix chains at arbitrary positions, producing tokens with no morphological meaning.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        Agglutinative languages — Turkish, Finnish, Hungarian, Korean, Swahili — attach suffix chains to root words to
+        encode tense, case, number, possession, and more. The Turkish word <em>çekoslavakyalılaştıramadıklarımızdanmışsınızcasına</em>
+        is a grammatically valid single word meaning roughly "as if you were one of those we could not make Czechoslovakian."
+        BPE sees a unique byte sequence and merges it at whatever character boundaries happened to be most frequent in training.
+        The resulting tokens have no morphological coherence.
+      </p>
+
+      <p>
+        Active research in this space (2024–2025) includes:
+      </p>
+      <ul>
+        <li><strong>Morpheus</strong> (arXiv 2606.18717): simultaneous morphologically-aware tokenizer and word embedder for Turkish.</li>
+        <li><strong>VerChol / Thunder-Tok</strong> (arXiv 2603.05883): grammar-first tokenization achieving 10% fertility reduction for Korean through linguistically informed pre-tokenization.</li>
+        <li><strong>MYTE</strong> (ACL 2024): uses Morfessor 2.0 to learn morpheme inventories per language, then assigns shorter byte sequences to morphologically meaningful units rather than arbitrary character n-grams.</li>
+        <li><strong>Tokens with Meaning</strong> (arXiv 2508.14292): hybrid approach for Turkish combining dictionary-driven morphological segmentation with phonological normalization and BPE fallback for OOV words.</li>
+      </ul>
+
+      <p>
+        The pattern across all this work: incorporating linguistic structure into tokenization improves performance on
+        morphologically rich languages. The challenge is that building the linguistic resources (morpheme analyzers,
+        morphologically annotated corpora) requires domain expertise that is expensive to produce for low-resource languages —
+        exactly the languages that most need better tokenization.
+      </p>
+
+      <!-- ===== 09: NP ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">09</span>
+          <span class="exp-card-title">The NP-Completeness Result — Why There's No Formula</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The proof:</strong> Whittington, Bachmann, and Pimentel (ACL 2025) proved that finding the optimal BPE
+            tokenization is NP-complete. Both the vocabulary selection problem and the encoding problem are in the
+            NP-complete complexity class.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        "Tokenisation is NP-Complete" (arXiv 2412.15210) is the cleanest theoretical result about tokenization in years.
+        It formalizes what practitioners had long suspected: you cannot compute the optimal vocabulary analytically.
+        Both forms of the optimization — (1) which vocabulary to construct and (2) how to encode text given a fixed vocabulary —
+        are computationally intractable in the worst case.
+      </p>
+
+      <p>
+        This explains a lot. It explains why every BPE implementation is greedy (merge the most frequent pair right now,
+        don't look ahead). It explains why the optimal corpus weights for multilingual training cannot be computed from
+        a formula — they're found by grid search. It explains why two tokenizers trained on similar data with similar
+        algorithms produce different vocabularies, and why you can always find a better tokenizer by running more experiments
+        but never prove you've found the best one.
+      </p>
+
+      <p>
+        The reduction used to prove NP-completeness is from set cover — a classical combinatorial optimization problem.
+        The proof establishes that designing the optimal vocabulary is at least as hard as set cover, which is
+        NP-complete. This means unless P = NP, there is no polynomial-time algorithm for optimal tokenization.
+        Every tokenizer in production, from GPT-4o to LLaMA 3 to Gemma, is an approximation to an intractable problem.
+      </p>
+
+      <div class="box box-insight">
+        <strong>What this means practically:</strong> the fertility landscape is not smooth, and grid search really is the right tool.
+        In the multilingual assignment, going from Telugu ×8 to ×9 replication widened the spread from 0.034 to 0.108 in a single step.
+        That's not a bug or a measurement artifact — it's a property of NP-hard optimization landscapes.
+        The optimum is a narrow ridge you can only find by running the experiments.
+      </div>
+
+      <!-- ===== Domain-specific ===== -->
+      <h2>Enterprise Pain Points</h2>
+
+      <p>
+        Beyond multilingual equity, three domain-specific tokenization problems come up repeatedly in production deployments.
+      </p>
+
+      <h3>Legal and Financial Text</h3>
+      <p>
+        KL3M (arXiv 2503.17247, March 2025) is the most significant domain-specific tokenizer paper of the year.
+        A family of BPE tokenizers trained specifically on legal, financial, and governmental text from US federal sources.
+        Despite a vocabulary 35% smaller than GPT-4o, KL3M achieves 9% fewer tokens overall for domain documents —
+        and for specific legal terminology: up to <strong>83% fewer tokens</strong> than LLaMA 3, because legal terms like
+        "notwithstanding" and "indemnification" that appear thousands of times in legal text get dedicated tokens
+        rather than being split into 6+ subwords.
+        All tokenizers are open-source on HuggingFace under <code>alea-institute/</code>.
+      </p>
+
+      <h3>LiteToken — Cleaning Up Vocabulary Bloat</h3>
+      <p>
+        A February 2026 paper from Peking University (arXiv 2602.04706) found that approximately 10% of tokens
+        in major vocabularies — including o200k_base, Qwen, DeepSeek, LLaMA 3, Gemma 3, and BLOOM —
+        are "intermediate merge residues": tokens that are frequent during vocabulary construction but almost
+        never emitted at inference because they are always further merged in practice.
+        These dead entries waste embedding space and introduce adversarial vulnerabilities (unusual inputs that force the model
+        through undertrained token embeddings). Removing them reduces vocabulary size without performance loss.
+      </p>
+
+      <h3>Domain Vocabulary Adaptation</h3>
+      <p>
+        "Getting the Most Out of Your Tokenizer for Pre-training and Domain Adaptation" (ICML 2024) showed how to
+        extend existing tokenizers to new domains without full retraining — adding medical, legal, or scientific
+        terminology to a general-purpose vocabulary while preserving compatibility with a pretrained model's embedding table.
+        AdaptBPE (arXiv 2601.21665) formalizes this into a reusable framework.
+      </p>
+
+      <!-- ===== Where it's going ===== -->
+      <h2>Where This Is Going</h2>
+
+      <p>
+        The field is moving in two directions simultaneously, and they may eventually converge.
+      </p>
+
+      <p>
+        <strong>Short term:</strong> vocabulary expansion will continue. 256K is probably not the ceiling.
+        The embedding table overhead is manageable, and the compression benefits for multilingual models are substantial.
+        Parity-aware training objectives that explicitly penalize cross-language fertility gaps will likely
+        be adopted by labs that care about non-English markets.
+      </p>
+
+      <p>
+        <strong>Medium term:</strong> byte-level models will enter production for specialized use cases first —
+        probably code (where tokenization artifacts cause the most measurable harm) and multilingual applications
+        (where the token tax is most expensive). The engineering for efficient byte-level inference is still being
+        worked out, but BLT's result makes the direction clear.
+      </p>
+
+      <p>
+        <strong>The open question:</strong> can a byte-level model trained at frontier scale outperform a tokenized model
+        trained on the same compute budget? BLT showed parity at 8B parameters. Nobody has tried at 70B or 400B.
+        The answer to that question will determine whether we're looking at a gradual transition or a hard architectural break.
+      </p>
+
+      <div class="box box-result">
+        <strong>Key papers to read:</strong><br>
+        Byte Latent Transformer — Pagnoni et al., Meta AI (ACL 2025, arXiv:2412.09871)<br>
+        Tokenisation is NP-Complete — Whittington et al. (ACL 2025, arXiv:2412.15210)<br>
+        MYTE: Morphology-Driven Byte Encoding — Limisiewicz et al. (ACL 2024)<br>
+        MrT5: Dynamic Token Merging — Kallini et al. (ICLR 2025, arXiv:2410.20771)<br>
+        KL3M Domain Tokenizers — Bommarito et al. (arXiv:2503.17247)<br>
+        LiteToken — Peking University (arXiv:2602.04706)<br>
+        BoundlessBPE (COLM 2025, arXiv:2504.00178)
+      </div>
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s2.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Try the Live Multilingual BPE Tokenizer →
+        </a>
+      </div>
+
+    </div><!-- .prose -->
+  </div><!-- .post-wrap -->
+
+  <footer>
+    <div class="footer-inner">
+      <p>Built with vanilla HTML &amp; CSS · <a href="https://github.com/harshvardhanraju/harshvardhanraju.github.io" target="_blank">Source on GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
