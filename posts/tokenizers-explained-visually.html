@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tokenizers, Explained Visually · Harsha Raju</title>
+  <meta name="description" content="Animations and interactive demos that make tokenizer architecture obvious — BPE merges live, the token tax measured, byte-level patching visualised." />
+  <meta property="og:title" content="Tokenizers, Explained Visually" />
+  <meta property="og:description" content="Watch BPE merge tokens in real time, see the token tax across six languages, and understand byte-level patching without equations." />
+  <meta property="og:url" content="https://harshvardhanraju.github.io/posts/tokenizers-explained-visually.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+
+  <style>
+    /* ── Visual article extras ── */
+    .vis-section {
+      margin: 3rem 0;
+      padding: 2rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+    }
+    .vis-title {
+      font-size: 0.65rem;
+      font-family: var(--mono);
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1rem;
+    }
+    .vis-caption {
+      font-size: 0.8rem;
+      color: var(--text3);
+      font-family: var(--mono);
+      margin-top: 0.8rem;
+      text-align: center;
+    }
+
+    /* ── BPE Merge Animation ── */
+    .bpe-arena {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      min-height: 120px;
+    }
+    .bpe-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      align-items: center;
+      min-height: 36px;
+    }
+    .tok {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      color: var(--text2);
+      transition: all 0.35s cubic-bezier(0.4,0,0.2,1);
+      white-space: nowrap;
+    }
+    .tok.merged {
+      background: rgba(139,92,246,0.2);
+      border-color: rgba(139,92,246,0.5);
+      color: #c4b5fd;
+      transform: scale(1.06);
+    }
+    .tok.new-tok {
+      background: rgba(16,185,129,0.2);
+      border-color: rgba(16,185,129,0.5);
+      color: #6ee7b7;
+      animation: popIn 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    @keyframes popIn {
+      from { transform: scale(0.6); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+    .bpe-controls {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .bpe-btn {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 0.4rem 1rem;
+      border-radius: 6px;
+      border: 1px solid rgba(139,92,246,0.4);
+      background: rgba(139,92,246,0.1);
+      color: #a78bfa;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .bpe-btn:hover { background: rgba(139,92,246,0.25); }
+    .bpe-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .bpe-status {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--text3);
+    }
+    .merge-label {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--accent2);
+      margin-bottom: 0.3rem;
+    }
+
+    /* ── Algorithm Compare ── */
+    .algo-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+    @media (max-width: 600px) { .algo-grid { grid-template-columns: 1fr; } }
+    .algo-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px;
+      padding: 1.2rem;
+    }
+    .algo-card-title {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.3rem;
+    }
+    .algo-card-sub {
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      color: var(--text3);
+      margin-bottom: 1rem;
+    }
+    .algo-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      margin-bottom: 0.55rem;
+    }
+    .algo-step-num {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: rgba(139,92,246,0.15);
+      border: 1px solid rgba(139,92,246,0.3);
+      font-size: 0.6rem;
+      font-family: var(--mono);
+      font-weight: 700;
+      color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .algo-step-text { font-size: 0.78rem; color: var(--text2); line-height: 1.55; }
+    .algo-formula {
+      margin-top: 0.8rem;
+      padding: 0.5rem 0.7rem;
+      background: rgba(0,0,0,0.3);
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--accent2);
+      text-align: center;
+    }
+
+    /* ── Vocab Bar Chart ── */
+    .vbar-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+    .vbar-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .vbar-label {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--text3);
+      width: 120px;
+      flex-shrink: 0;
+      text-align: right;
+    }
+    .vbar-track {
+      flex: 1;
+      height: 26px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+    .vbar-fill {
+      height: 100%;
+      border-radius: 6px;
+      width: 0;
+      transition: width 1.2s cubic-bezier(0.4,0,0.2,1);
+      display: flex;
+      align-items: center;
+      padding-left: 0.6rem;
+    }
+    .vbar-val {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      white-space: nowrap;
+    }
+
+    /* ── Token Tax ── */
+    .tax-table { display: flex; flex-direction: column; gap: 1.1rem; }
+    .tax-row { display: flex; flex-direction: column; gap: 0.4rem; }
+    .tax-lang {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tax-lang-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .tax-multiplier {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.1rem 0.45rem;
+      border-radius: 4px;
+    }
+    .tax-mult-ok  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .tax-mult-mid { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .tax-mult-bad { background: rgba(239,68,68,0.15);  color: #fca5a5; }
+    .tax-tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+    }
+    .tax-tok {
+      height: 22px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      padding: 0 0.4rem;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .tax-tok.visible { opacity: 1; transform: none; }
+
+    /* ── BLT Entropy Patching ── */
+    .entropy-viz {
+      position: relative;
+      overflow: hidden;
+    }
+    .bytes-row {
+      display: flex;
+      gap: 2px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 0.5rem;
+    }
+    .byte-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .byte-bar-wrap {
+      width: 22px;
+      height: 60px;
+      display: flex;
+      align-items: flex-end;
+      background: rgba(255,255,255,0.03);
+      border-radius: 3px 3px 0 0;
+    }
+    .byte-bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      transition: height 0.8s cubic-bezier(0.4,0,0.2,1);
+    }
+    .byte-char {
+      font-family: var(--mono);
+      font-size: 0.6rem;
+      color: var(--text3);
+      text-align: center;
+    }
+    .patch-overlay {
+      display: flex;
+      gap: 2px;
+      margin-top: 0.5rem;
+    }
+    .patch-block {
+      height: 20px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 0.6rem;
+      font-weight: 700;
+      color: rgba(255,255,255,0.85);
+      flex-shrink: 0;
+    }
+    .entropy-legend {
+      display: flex;
+      gap: 1.2rem;
+      margin-top: 0.8rem;
+      flex-wrap: wrap;
+    }
+    .entropy-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.72rem;
+      color: var(--text3);
+    }
+    .legend-dot {
+      width: 10px; height: 10px;
+      border-radius: 2px;
+    }
+
+    /* ── Arithmetic Split ── */
+    .arith-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 500px) { .arith-grid { grid-template-columns: 1fr; } }
+    .arith-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .arith-model {
+      font-size: 0.7rem;
+      font-family: var(--mono);
+      color: var(--text3);
+      margin-bottom: 0.5rem;
+    }
+    .arith-tokens {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .arith-tok {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      font-weight: 700;
+      padding: 0.3rem 0.6rem;
+      border-radius: 6px;
+      border: 1px solid;
+    }
+    .arith-good { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.4); color: #6ee7b7; }
+    .arith-bad  { background: rgba(239,68,68,0.15);  border-color: rgba(239,68,68,0.4);  color: #fca5a5; }
+    .arith-note {
+      font-size: 0.72rem;
+      color: var(--text3);
+      margin-top: 0.6rem;
+      line-height: 1.5;
+    }
+
+    /* ── Fertility Gauges ── */
+    .gauge-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.8rem;
+    }
+    @media (max-width: 500px) { .gauge-grid { grid-template-columns: repeat(2,1fr); } }
+    .gauge-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .gauge-svg { overflow: visible; }
+    .gauge-lang {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text2);
+      text-align: center;
+    }
+    .gauge-val {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-align: center;
+    }
+
+    /* ── Token Streaming Hero ── */
+    .stream-hero {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text3);
+      line-height: 2.2;
+      word-break: break-all;
+      padding: 1rem;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      min-height: 60px;
+    }
+    .stream-tok {
+      display: inline-block;
+      padding: 0.05rem 0.3rem;
+      margin: 1px;
+      border-radius: 3px;
+      opacity: 0;
+      animation: fadeSlideIn 0.25s ease both;
+    }
+    @keyframes fadeSlideIn {
+      from { opacity:0; transform: translateY(4px); }
+      to   { opacity:1; transform: none; }
+    }
+
+    /* ── Scroll-reveal ── */
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-ml">NLP</span>
+        <span class="tag tag-viz">Visual Guide</span>
+        <span class="tag tag-era">2026</span>
+      </div>
+      <h1 class="post-heading">Tokenizers, Explained Visually</h1>
+      <div class="post-header-meta">
+        <span>📅 16 Jul 2026</span>
+        <span>⏱ 12 min read</span>
+        <span><a href="posts/tokenizer-landscape-2026.html">Full research article ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Every large language model starts with a step nobody draws: converting text into token IDs.
+        That step determines cost, fairness, and whether the model can do arithmetic at all.
+        Here's the full picture — with live animations, not equations.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <!-- ═══════════════════════════════════════════
+           VIS 1: Live BPE Merge
+      ════════════════════════════════════════════ -->
+      <h2>Watch BPE Learn</h2>
+      <p>
+        Byte Pair Encoding starts from individual characters and iteratively merges the most frequent adjacent pair.
+        Step through the classic example below — each click performs one merge operation.
+      </p>
+
+      <div class="vis-section reveal">
+        <div class="vis-title">Interactive — BPE Merge Steps</div>
+        <div id="merge-label" class="merge-label">Starting vocabulary: individual characters</div>
+        <div class="bpe-arena" id="bpe-arena"></div>
+        <div class="bpe-controls">
+          <button class="bpe-btn" id="bpe-step">Next Merge →</button>
+          <button class="bpe-btn" id="bpe-reset">Reset</button>
+          <span class="bpe-status" id="bpe-status">Step 0 / 8</span>
+        </div>
+        <p class="vis-caption">Text: "low lower newest widest" — the textbook BPE example (Sennrich et al. 2016)</p>
+      </div>
+
+      <p>
+        Notice how each step collapses one frequent pair into a new token. By step 4, <code>l·o·w</code> is a
+        single unit. By step 8, <code>low·er</code> is one token because it appeared multiple times in the corpus.
+        The algorithm never looks ahead — it greedily takes the highest-frequency pair at each step.
+        That greedy choice is, it turns out, optimal BPE is NP-complete, so greedy is all we have.
+      </p>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 2: Algorithm Comparison
+      ════════════════════════════════════════════ -->
+      <h2>Three Algorithms, Three Philosophies</h2>
+
+      <div class="vis-section reveal">
+        <div class="vis-title">Side-by-Side — BPE vs WordPiece vs Unigram LM</div>
+        <div class="algo-grid">
+
+          <div class="algo-card">
+            <div class="algo-card-title">BPE</div>
+            <div class="algo-card-sub">GPT-4o · LLaMA 3 · Qwen · DeepSeek</div>
+            <div class="algo-step">
+              <div class="algo-step-num">1</div>
+              <div class="algo-step-text">Start with every character as its own token</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">2</div>
+              <div class="algo-step-text">Count every adjacent pair across all training text</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">3</div>
+              <div class="algo-step-text">Merge the <strong>most frequent</strong> pair into a new token</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">4</div>
+              <div class="algo-step-text">Repeat until vocab size is reached</div>
+            </div>
+            <div class="algo-formula">merge = argmax freq(pair)</div>
+          </div>
+
+          <div class="algo-card">
+            <div class="algo-card-title">WordPiece</div>
+            <div class="algo-card-sub">BERT · DistilBERT · older Google</div>
+            <div class="algo-step">
+              <div class="algo-step-num">1</div>
+              <div class="algo-step-text">Start with every character as its own token</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">2</div>
+              <div class="algo-step-text">Count how often pairs appear <em>relative to chance</em></div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">3</div>
+              <div class="algo-step-text">Merge the pair with highest <strong>pointwise mutual information</strong></div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">4</div>
+              <div class="algo-step-text">Repeat until vocab size is reached</div>
+            </div>
+            <div class="algo-formula">score = freq(AB) / (freq(A)·freq(B))</div>
+          </div>
+
+          <div class="algo-card">
+            <div class="algo-card-title">Unigram LM</div>
+            <div class="algo-card-sub">Gemma · Gemini · T5 · LLaMA 1/2</div>
+            <div class="algo-step">
+              <div class="algo-step-num">1</div>
+              <div class="algo-step-text">Start with a <em>huge</em> over-complete vocabulary</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">2</div>
+              <div class="algo-step-text">Score each token by its log-probability in a unigram LM</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">3</div>
+              <div class="algo-step-text"><strong>Remove</strong> the token whose removal hurts likelihood least</div>
+            </div>
+            <div class="algo-step">
+              <div class="algo-step-num">4</div>
+              <div class="algo-step-text">Repeat until vocab size is reached</div>
+            </div>
+            <div class="algo-formula">remove = argmin ΔlogP(corpus)</div>
+          </div>
+
+        </div>
+        <p class="vis-caption">BPE and WordPiece build up from characters. Unigram LM prunes down from a large set.</p>
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 3: Vocabulary Race
+      ════════════════════════════════════════════ -->
+      <h2>The Vocabulary Size Race</h2>
+      <p>
+        Every major lab expanded their vocabulary in 2024–2025. More tokens = better compression = fewer tokens per sentence = faster inference.
+        The tradeoff: embedding tables grow linearly with vocabulary size.
+        At 4096 embedding dimensions, going from 32K to 256K tokens adds about 1B parameters before any transformer layer.
+      </p>
+
+      <div class="vis-section reveal" id="vbar-section">
+        <div class="vis-title">Vocabulary Size by Model (scroll to animate)</div>
+        <div class="vbar-chart">
+          <div class="vbar-row">
+            <div class="vbar-label">GPT-2 · 2019</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="19.6" style="background: linear-gradient(90deg,#475569,#64748b);">
+                <span class="vbar-val">50K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">BERT · 2019</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="11.9" style="background: linear-gradient(90deg,#475569,#64748b);">
+                <span class="vbar-val">30K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">LLaMA 2 · 2023</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="12.5" style="background: linear-gradient(90deg,#4338ca,#6366f1);">
+                <span class="vbar-val">32K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">GPT-4 · 2023</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="39.1" style="background: linear-gradient(90deg,#7c3aed,#8b5cf6);">
+                <span class="vbar-val">100K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">LLaMA 3 · 2024</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="50" style="background: linear-gradient(90deg,#7c3aed,#a78bfa);">
+                <span class="vbar-val">128K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">Qwen 2/3 · 2024</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="59.4" style="background: linear-gradient(90deg,#0891b2,#06b6d4);">
+                <span class="vbar-val">152K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">GPT-4o · 2024</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="78.1" style="background: linear-gradient(90deg,#0891b2,#22d3ee);">
+                <span class="vbar-val">200K</span>
+              </div>
+            </div>
+          </div>
+          <div class="vbar-row">
+            <div class="vbar-label">Gemma/Gemini</div>
+            <div class="vbar-track">
+              <div class="vbar-fill" data-pct="100" style="background: linear-gradient(90deg,#059669,#10b981);">
+                <span class="vbar-val">256K ← largest</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="vis-caption">Bar widths are proportional to vocabulary size. Gemini's 256K = 5× more tokens than BERT.</p>
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 4: Token Tax
+      ════════════════════════════════════════════ -->
+      <h2>The Token Tax — Same Meaning, Different Cost</h2>
+      <p>
+        The phrase "I love India" (or its equivalent) tokenizes into very different numbers of tokens
+        depending on the language. With GPT-4's cl100k_base tokenizer, Arabic text costs 3.3× more
+        per word than English. Every non-English user pays a silent tax on every API call.
+      </p>
+
+      <div class="vis-section reveal" id="tax-section">
+        <div class="vis-title">Token Tax — GPT-4 cl100k_base (click a language to reveal)</div>
+        <div class="tax-table" id="tax-table"></div>
+        <p class="vis-caption">
+          Colors represent different tokens. More boxes = more tokens = higher compute cost and API bill.
+        </p>
+      </div>
+
+      <p>
+        The 4o upgrade (o200k_base, 200K vocabulary) improved CJK by ~40%. But Arabic, Bengali, and Tamil
+        remain penalized. The vocabulary budget went wherever the training data was most concentrated — which was English.
+      </p>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 5: Fertility Gauges
+      ════════════════════════════════════════════ -->
+      <h2>Fertility — Measuring Tokenizer Fairness</h2>
+      <p>
+        Fertility = tokens produced ÷ meaningful units in the original text. A perfect tokenizer would
+        score 1.0 for every language. The multilingual BPE tokenizer I built for ERA v5 coursework
+        achieves between 1.258 and 1.291 — a spread of just 0.034 across four scripts.
+      </p>
+
+      <div class="vis-section reveal" id="gauge-section">
+        <div class="vis-title">Fertility Scores — ERA v5 Multilingual Tokenizer (10K vocab)</div>
+        <div class="gauge-grid" id="gauge-grid"></div>
+        <p class="vis-caption">Lower fertility = better compression. The spread (max − min) = 0.034 determines the score.</p>
+      </div>
+
+      <div class="box box-insight">
+        <strong>What the spread means concretely:</strong> for every 100 meaningful units of text, the worst-served
+        language (Telugu, 1.291) produces only 3.4 more tokens than the best-served language (Bengali, 1.258).
+        The reference solution has a spread of 0.154 — 15.4 extra tokens per 100 units. We're 4.3× more equitable.
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 6: BLT Entropy Patching
+      ════════════════════════════════════════════ -->
+      <h2>How BLT Works — Entropy-Based Dynamic Patching</h2>
+      <p>
+        Meta's Byte Latent Transformer (ACL 2025) is the first byte-level model to match tokenized LLMs
+        at fixed compute. The key insight: allocate more compute where text is <em>complex</em> (high entropy),
+        and use long, cheap patches where text is <em>predictable</em>.
+      </p>
+
+      <div class="vis-section reveal" id="blt-section">
+        <div class="vis-title">BLT vs BPE — Dynamic vs Fixed Tokenization</div>
+
+        <p style="font-size:0.82rem;color:var(--text2);margin-bottom:1rem;">
+          Bar height = byte-level entropy (how uncertain the model is about the next byte).
+          BLT places patch boundaries at entropy peaks. BPE cuts at fixed vocabulary-learned positions regardless of difficulty.
+        </p>
+
+        <div id="blt-viz"></div>
+
+        <div class="entropy-legend">
+          <div class="entropy-legend-item">
+            <div class="legend-dot" style="background:#8b5cf6"></div>
+            <span>High entropy (complex — short patch, more compute)</span>
+          </div>
+          <div class="entropy-legend-item">
+            <div class="legend-dot" style="background:#06b6d4"></div>
+            <span>Medium entropy</span>
+          </div>
+          <div class="entropy-legend-item">
+            <div class="legend-dot" style="background:#10b981"></div>
+            <span>Low entropy (predictable — long patch, less compute)</span>
+          </div>
+        </div>
+        <p class="vis-caption">Result: 8B params / 4T bytes — matches tokenized LLM performance at fixed FLOP cost (Meta AI, ACL 2025)</p>
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 7: Arithmetic Failure
+      ════════════════════════════════════════════ -->
+      <h2>Why LLMs Fail at Arithmetic</h2>
+      <p>
+        The number 12345 doesn't have a consistent token representation. Depending on what surrounds it,
+        it could split three different ways. The model never "sees" digits — it sees opaque numeric blobs.
+        There's no place-value structure a neural network could learn arithmetic from.
+      </p>
+
+      <div class="vis-section reveal">
+        <div class="vis-title">How "12345" Tokenizes — Inconsistency Visualized</div>
+        <div class="arith-grid">
+          <div class="arith-card">
+            <div class="arith-model">GPT-4o · o200k_base · in context A</div>
+            <div class="arith-tokens">
+              <span class="arith-tok arith-bad">123</span>
+              <span class="arith-tok arith-bad">45</span>
+            </div>
+            <div class="arith-note">2 tokens. No digit structure. Model cannot learn that "1" is in the ten-thousands place.</div>
+          </div>
+          <div class="arith-card">
+            <div class="arith-model">GPT-4o · o200k_base · in context B</div>
+            <div class="arith-tokens">
+              <span class="arith-tok arith-bad">12</span>
+              <span class="arith-tok arith-bad">345</span>
+            </div>
+            <div class="arith-note">Same number, different split. The model sees a completely different representation.</div>
+          </div>
+          <div class="arith-card">
+            <div class="arith-model">Gemma · split-digit tokenizer</div>
+            <div class="arith-tokens">
+              <span class="arith-tok arith-good">1</span>
+              <span class="arith-tok arith-good">2</span>
+              <span class="arith-tok arith-good">3</span>
+              <span class="arith-tok arith-good">4</span>
+              <span class="arith-tok arith-good">5</span>
+            </div>
+            <div class="arith-note">Always 5 tokens. Consistent place-value structure. Model can learn arithmetic.</div>
+          </div>
+          <div class="arith-card">
+            <div class="arith-model">Production workaround (everyone else)</div>
+            <div class="arith-tokens">
+              <span class="arith-tok" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#fcd34d;">Python</span>
+              <span class="arith-tok" style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#fcd34d;">eval()</span>
+            </div>
+            <div class="arith-note">Route arithmetic to a code interpreter. Don't ask the LLM to do digit-level computation.</div>
+          </div>
+        </div>
+        <p class="vis-caption">"Say Anything but This" (arXiv 2601.14658) proved arithmetic failures are systematic, not random — caused by tokenizer inconsistency.</p>
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           VIS 8: Byte-level comparison
+      ════════════════════════════════════════════ -->
+      <h2>The Byte-Level Model Family</h2>
+
+      <div class="vis-section reveal">
+        <div class="vis-title">Evolution of Byte-Level Architectures</div>
+        <div style="display:flex;flex-direction:column;gap:0.8rem;">
+
+          <div style="display:grid;grid-template-columns:100px 1fr;gap:1rem;align-items:start;">
+            <div style="font-family:var(--mono);font-size:0.7rem;color:var(--text3);padding-top:0.2rem;">ByT5 · 2022</div>
+            <div>
+              <div style="height:8px;background:rgba(239,68,68,0.3);border-radius:4px;margin-bottom:0.3rem;position:relative;">
+                <div style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.6rem;font-family:var(--mono);color:#fca5a5;">Sequence length: 6×</div>
+              </div>
+              <div style="font-size:0.75rem;color:var(--text3);">Baseline. Raw UTF-8 bytes. Works, but slow due to long sequences.</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:100px 1fr;gap:1rem;align-items:start;">
+            <div style="font-family:var(--mono);font-size:0.7rem;color:var(--text3);padding-top:0.2rem;">MrT5 · 2025</div>
+            <div>
+              <div style="height:8px;background:rgba(245,158,11,0.3);border-radius:4px;margin-bottom:0.3rem;position:relative;">
+                <div style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.6rem;font-family:var(--mono);color:#fcd34d;">Sequence length: 1.2× (after deletion)</div>
+              </div>
+              <div style="font-size:0.75rem;color:var(--text3);">Learned delete gate removes 80% of tokens mid-encoder. Byte input, token-level cost.</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:100px 1fr;gap:1rem;align-items:start;">
+            <div style="font-family:var(--mono);font-size:0.7rem;color:var(--text3);padding-top:0.2rem;">BLT · 2025</div>
+            <div>
+              <div style="height:8px;background:rgba(16,185,129,0.4);border-radius:4px;margin-bottom:0.3rem;position:relative;">
+                <div style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.6rem;font-family:var(--mono);color:#6ee7b7;">Dynamic: 1.0–3.0× (content-dependent)</div>
+              </div>
+              <div style="font-size:0.75rem;color:var(--text3);">Entropy-based patching. Hard text gets short patches; easy text gets long ones. <strong>Matches tokenized LLMs at 8B / 4T bytes.</strong></div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:100px 1fr;gap:1rem;align-items:start;">
+            <div style="font-family:var(--mono);font-size:0.7rem;color:var(--text3);padding-top:0.2rem;">Tokenized LLM</div>
+            <div>
+              <div style="height:8px;background:rgba(139,92,246,0.3);border-radius:4px;margin-bottom:0.3rem;position:relative;">
+                <div style="position:absolute;right:0.5rem;top:50%;transform:translateY(-50%);font-size:0.6rem;font-family:var(--mono);color:#c4b5fd;">Sequence length: 1.0× (baseline)</div>
+              </div>
+              <div style="font-size:0.75rem;color:var(--text3);">Current production. BLT now matches this at fixed compute. BoundlessBPE adds 15% better compression by merging across word boundaries.</div>
+            </div>
+          </div>
+        </div>
+        <p class="vis-caption">MrT5 (ICLR 2025) and BLT (ACL 2025) are the two credible paths to production byte-level models.</p>
+      </div>
+
+      <!-- ═══════════════════════════════════════════
+           Takeaway
+      ════════════════════════════════════════════ -->
+      <h2>The Single Most Surprising Result</h2>
+
+      <p>
+        Tokenization is NP-complete. Whittington, Bachmann, and Pimentel proved this at ACL 2025 (arXiv:2412.15210)
+        using a reduction from set cover. Both forms of the problem — choosing which vocabulary to build,
+        and encoding text given a fixed vocabulary — are computationally intractable in general.
+      </p>
+
+      <p>
+        This means every tokenizer you've ever used — GPT-4o, LLaMA 3, Gemma — is a greedy approximation
+        to a problem that cannot be solved optimally. There is no formula for the best vocabulary.
+        There is no closed-form for the best corpus weights. Grid search is not a shortcut.
+        It is provably the correct approach.
+      </p>
+
+      <div class="box box-claim">
+        <strong>The landscape is not smooth:</strong> in building the multilingual tokenizer for ERA v5,
+        increasing Telugu corpus weight from ×8 to ×9 widened the fertility spread from 0.034 to 0.108
+        in a single step — a 3× regression from one parameter change. This is not a bug.
+        It's what NP-hard optimization landscapes look like.
+      </div>
+
+      <div class="demo-btn-wrap">
+        <a href="https://harsha-erav5-s2.netlify.app" target="_blank" class="demo-btn">
+          <span class="demo-btn-icon">⚡</span>
+          Try the Live Multilingual BPE Tokenizer →
+        </a>
+      </div>
+
+      <p style="text-align:center;margin-top:1rem;">
+        <a href="tokenizer-landscape-2026.html" style="color:var(--text3);font-size:0.82rem;font-family:var(--mono);">
+          Read the full research review →
+        </a>
+      </p>
+
+    </div><!-- .prose -->
+  </div><!-- .post-wrap -->
+
+  <footer>
+    <div class="footer-inner">
+      <p>Built with vanilla HTML &amp; CSS · <a href="https://github.com/harshvardhanraju/harshvardhanraju.github.io" target="_blank">Source on GitHub</a></p>
+    </div>
+  </footer>
+
+<script>
+/* ═══════════════════════════════════════════
+   BPE MERGE ANIMATION
+════════════════════════════════════════════ */
+const BPE_STEPS = [
+  {
+    label: "Starting vocabulary: individual characters",
+    rows: [
+      ["l","o","w","·","l","o","w","e","r","·","n","e","w","e","s","t","·","w","i","d","e","s","t"],
+    ],
+    highlight: [],
+  },
+  {
+    label: "Merge 1: 'e' + 's' → 'es'  (appears in newest, widest)",
+    rows: [
+      ["l","o","w","·","l","o","w","e","r","·","n","e","w","es","t","·","w","i","d","es","t"],
+    ],
+    highlight: ["es"],
+  },
+  {
+    label: "Merge 2: 'es' + 't' → 'est'",
+    rows: [
+      ["l","o","w","·","l","o","w","e","r","·","n","e","w","est","·","w","i","d","est"],
+    ],
+    highlight: ["est"],
+  },
+  {
+    label: "Merge 3: 'l' + 'o' → 'lo'",
+    rows: [
+      ["lo","w","·","lo","w","e","r","·","n","e","w","est","·","w","i","d","est"],
+    ],
+    highlight: ["lo"],
+  },
+  {
+    label: "Merge 4: 'lo' + 'w' → 'low'",
+    rows: [
+      ["low","·","low","e","r","·","n","e","w","est","·","w","i","d","est"],
+    ],
+    highlight: ["low"],
+  },
+  {
+    label: "Merge 5: 'n' + 'e' → 'ne'",
+    rows: [
+      ["low","·","low","e","r","·","ne","w","est","·","w","i","d","est"],
+    ],
+    highlight: ["ne"],
+  },
+  {
+    label: "Merge 6: 'ne' + 'w' → 'new'",
+    rows: [
+      ["low","·","low","e","r","·","new","est","·","w","i","d","est"],
+    ],
+    highlight: ["new"],
+  },
+  {
+    label: "Merge 7: 'low' + 'e' → 'lowe'",
+    rows: [
+      ["low","·","lowe","r","·","new","est","·","w","i","d","est"],
+    ],
+    highlight: ["lowe"],
+  },
+  {
+    label: "Merge 8: 'lowe' + 'r' → 'lower'",
+    rows: [
+      ["low","·","lower","·","new","est","·","w","i","d","est"],
+    ],
+    highlight: ["lower"],
+  },
+];
+
+let bpeStep = 0;
+const arena = document.getElementById("bpe-arena");
+const statusEl = document.getElementById("bpe-status");
+const labelEl = document.getElementById("merge-label");
+
+function renderBPE(step) {
+  const s = BPE_STEPS[step];
+  labelEl.textContent = s.label;
+  arena.innerHTML = "";
+  s.rows.forEach(row => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "bpe-row";
+    row.forEach(tok => {
+      const el = document.createElement("span");
+      el.className = "tok";
+      if (tok === "·") {
+        el.style.background = "none";
+        el.style.border = "none";
+        el.style.color = "var(--text3)";
+        el.textContent = "│";
+      } else {
+        el.textContent = tok;
+        if (s.highlight.includes(tok)) {
+          el.className = "tok new-tok";
+        }
+      }
+      rowEl.appendChild(el);
+    });
+    arena.appendChild(rowEl);
+  });
+  statusEl.textContent = `Step ${step} / ${BPE_STEPS.length - 1}`;
+  document.getElementById("bpe-step").disabled = step >= BPE_STEPS.length - 1;
+}
+
+document.getElementById("bpe-step").addEventListener("click", () => {
+  if (bpeStep < BPE_STEPS.length - 1) { bpeStep++; renderBPE(bpeStep); }
+});
+document.getElementById("bpe-reset").addEventListener("click", () => {
+  bpeStep = 0; renderBPE(0);
+});
+renderBPE(0);
+
+/* ═══════════════════════════════════════════
+   SCROLL-TRIGGERED VOCABULARY BARS
+════════════════════════════════════════════ */
+function animateVbars() {
+  document.querySelectorAll(".vbar-fill").forEach(el => {
+    el.style.width = el.dataset.pct + "%";
+  });
+}
+
+/* ═══════════════════════════════════════════
+   TOKEN TAX VISUALIZATION
+════════════════════════════════════════════ */
+const TAX_LANGS = [
+  {
+    name: "English", flag: "🇺🇸", mult: "1.0×", multClass: "tax-mult-ok",
+    phrase: "I love India",
+    tokens: [
+      { text: "▁I",      color: "#7c3aed" },
+      { text: "▁love",   color: "#2563eb" },
+      { text: "▁India",  color: "#059669" },
+    ],
+  },
+  {
+    name: "Spanish", flag: "🇪🇸", mult: "1.55×", multClass: "tax-mult-mid",
+    phrase: "Me encanta India",
+    tokens: [
+      { text: "▁Me",      color: "#7c3aed" },
+      { text: "▁en",      color: "#2563eb" },
+      { text: "cant",     color: "#0891b2" },
+      { text: "a",        color: "#d97706" },
+      { text: "▁India",   color: "#059669" },
+    ],
+  },
+  {
+    name: "Hindi", flag: "🇮🇳", mult: "2.1×", multClass: "tax-mult-bad",
+    phrase: "मुझे भारत से प्यार है",
+    tokens: [
+      { text: "▁म", color: "#7c3aed" },
+      { text: "ु",  color: "#4f46e5" },
+      { text: "झे", color: "#2563eb" },
+      { text: "▁भ", color: "#0891b2" },
+      { text: "ार", color: "#0e7490" },
+      { text: "त",  color: "#047857" },
+      { text: "▁स", color: "#059669" },
+      { text: "े",  color: "#d97706" },
+      { text: "▁प", color: "#b45309" },
+      { text: "्",  color: "#92400e" },
+      { text: "य",  color: "#991b1b" },
+      { text: "ार", color: "#7c3aed" },
+      { text: "▁ह", color: "#4f46e5" },
+      { text: "ै",  color: "#2563eb" },
+    ],
+  },
+  {
+    name: "Arabic", flag: "🇸🇦", mult: "3.3×", multClass: "tax-mult-bad",
+    phrase: "أنا أحب الهند",
+    tokens: [
+      { text: "▁أ",  color: "#7c3aed" },
+      { text: "ن",   color: "#4f46e5" },
+      { text: "ا",   color: "#2563eb" },
+      { text: "▁أ",  color: "#0891b2" },
+      { text: "ح",   color: "#0e7490" },
+      { text: "ب",   color: "#047857" },
+      { text: "▁ال", color: "#059669" },
+      { text: "ه",   color: "#d97706" },
+      { text: "ند",  color: "#b45309" },
+    ],
+  },
+  {
+    name: "Telugu", flag: "🇮🇳", mult: "2.8×", multClass: "tax-mult-bad",
+    phrase: "నాకు భారతదేశం అంటే ఇష్టం",
+    tokens: [
+      { text: "▁న",  color: "#7c3aed" },
+      { text: "ాక",  color: "#4f46e5" },
+      { text: "ు",   color: "#2563eb" },
+      { text: "▁భ",  color: "#0891b2" },
+      { text: "ారత", color: "#0e7490" },
+      { text: "దేశ", color: "#047857" },
+      { text: "ం",   color: "#059669" },
+      { text: "▁అం", color: "#d97706" },
+      { text: "టే",  color: "#b45309" },
+      { text: "▁ఇ",  color: "#92400e" },
+      { text: "ష్ట", color: "#991b1b" },
+      { text: "ం",   color: "#7c3aed" },
+    ],
+  },
+  {
+    name: "Bengali", flag: "🇧🇩", mult: "2.4×", multClass: "tax-mult-bad",
+    phrase: "আমি ভারতকে ভালোবাসি",
+    tokens: [
+      { text: "▁আ",  color: "#7c3aed" },
+      { text: "মি",  color: "#4f46e5" },
+      { text: "▁ভ",  color: "#2563eb" },
+      { text: "ার",  color: "#0891b2" },
+      { text: "তক",  color: "#0e7490" },
+      { text: "ে",   color: "#047857" },
+      { text: "▁ভ",  color: "#059669" },
+      { text: "াল",  color: "#d97706" },
+      { text: "ো",   color: "#b45309" },
+      { text: "বাস", color: "#92400e" },
+      { text: "ি",   color: "#991b1b" },
+    ],
+  },
+];
+
+const taxTable = document.getElementById("tax-table");
+TAX_LANGS.forEach((lang, li) => {
+  const row = document.createElement("div");
+  row.className = "tax-row";
+  row.innerHTML = `
+    <div class="tax-lang">
+      <div class="tax-lang-name">
+        <span>${lang.flag}</span>
+        <span>${lang.name}</span>
+        <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text3);">"${lang.phrase}"</span>
+      </div>
+      <span class="tax-multiplier ${lang.multClass}">${lang.mult} cost</span>
+    </div>
+    <div class="tax-tokens" id="tax-toks-${li}"></div>
+  `;
+  taxTable.appendChild(row);
+  const toksEl = document.getElementById(`tax-toks-${li}`);
+  lang.tokens.forEach((tok, ti) => {
+    const el = document.createElement("span");
+    el.className = "tax-tok";
+    el.textContent = tok.text;
+    el.style.background = tok.color + "30";
+    el.style.border = `1px solid ${tok.color}60`;
+    el.style.color = tok.color + "cc";
+    el.style.transitionDelay = `${ti * 80}ms`;
+    toksEl.appendChild(el);
+  });
+});
+
+/* ═══════════════════════════════════════════
+   FERTILITY GAUGES
+════════════════════════════════════════════ */
+const GAUGES = [
+  { lang: "Bengali",  script: "বাংলা", val: 1.2576, color: "#10b981" },
+  { lang: "Hindi",    script: "हिन्दी", val: 1.2636, color: "#06b6d4" },
+  { lang: "English",  script: "Latin",  val: 1.2883, color: "#8b5cf6" },
+  { lang: "Telugu",   script: "తెలుగు", val: 1.2911, color: "#f59e0b" },
+];
+
+const gaugeGrid = document.getElementById("gauge-grid");
+GAUGES.forEach(g => {
+  const minF = 1.0, maxF = 1.6;
+  const angleDeg = ((g.val - minF) / (maxF - minF)) * 180 - 90;
+  const r = 38, cx = 50, cy = 50;
+  const startAngle = -Math.PI;
+  const endAngle   = 0;
+  const arcX1 = cx + r * Math.cos(startAngle);
+  const arcY1 = cy + r * Math.sin(startAngle);
+  const arcX2 = cx + r * Math.cos(endAngle);
+  const arcY2 = cy + r * Math.sin(endAngle);
+  const needleAngle = (angleDeg * Math.PI) / 180;
+  const nx = cx + (r - 4) * Math.cos(needleAngle);
+  const ny = cy + (r - 4) * Math.sin(needleAngle);
+
+  const div = document.createElement("div");
+  div.className = "gauge-card";
+  div.innerHTML = `
+    <svg class="gauge-svg" viewBox="0 0 100 60" width="120" height="72" id="gauge-${g.lang}">
+      <path d="M ${arcX1} ${arcY1} A ${r} ${r} 0 0 1 ${arcX2} ${arcY2}"
+        fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="6" stroke-linecap="round"/>
+      <path d="M ${arcX1} ${arcY1} A ${r} ${r} 0 0 1 ${arcX2} ${arcY2}"
+        fill="none" stroke="${g.color}" stroke-width="6" stroke-linecap="round"
+        stroke-dasharray="120" stroke-dashoffset="120" id="gauge-arc-${g.lang}"
+        style="transition: stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1)"/>
+      <line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}"
+        stroke="${g.color}" stroke-width="2.5" stroke-linecap="round"
+        id="gauge-needle-${g.lang}"
+        style="transform-origin: ${cx}px ${cy}px;
+               transform: rotate(-180deg);
+               transition: transform 1.2s cubic-bezier(0.4,0,0.2,1);"/>
+      <circle cx="${cx}" cy="${cy}" r="3" fill="${g.color}"/>
+      <text x="${arcX1}" y="${arcY1 + 8}" font-size="6" fill="rgba(255,255,255,0.3)" font-family="monospace" text-anchor="middle">1.0</text>
+      <text x="${arcX2}" y="${arcY2 + 8}" font-size="6" fill="rgba(255,255,255,0.3)" font-family="monospace" text-anchor="middle">1.6</text>
+    </svg>
+    <div class="gauge-lang">${g.lang}<br><span style="font-size:0.62rem;color:var(--text3);">${g.script}</span></div>
+    <div class="gauge-val" id="gauge-val-${g.lang}">—</div>
+  `;
+  gaugeGrid.appendChild(div);
+});
+
+function animateGauges() {
+  GAUGES.forEach(g => {
+    const minF = 1.0, maxF = 1.6;
+    const pct = (g.val - minF) / (maxF - minF);
+    const arcEl    = document.getElementById(`gauge-arc-${g.lang}`);
+    const needleEl = document.getElementById(`gauge-needle-${g.lang}`);
+    const valEl    = document.getElementById(`gauge-val-${g.lang}`);
+    if (arcEl) {
+      arcEl.style.strokeDashoffset = 120 - pct * 120;
+    }
+    if (needleEl) {
+      const deg = pct * 180 - 180;
+      needleEl.style.transform = `rotate(${deg}deg)`;
+    }
+    if (valEl) {
+      let start = 1.0, current = 1.0;
+      const step = () => {
+        current = Math.min(current + (g.val - start) / 40, g.val);
+        valEl.textContent = current.toFixed(4);
+        if (current < g.val) requestAnimationFrame(step);
+      };
+      setTimeout(() => requestAnimationFrame(step), 400);
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════
+   BLT ENTROPY VISUALIZATION
+════════════════════════════════════════════ */
+const BLT_DATA = [
+  // [char, entropy 0-1, patch-color, patch-width-cells]
+  { c:"T",  e:0.15, p:"#10b981", pw:4  },
+  { c:"h",  e:0.08, p:"#10b981", pw:null },
+  { c:"e",  e:0.09, p:"#10b981", pw:null },
+  { c:"▁",  e:0.11, p:"#10b981", pw:null },
+  { c:"q",  e:0.72, p:"#8b5cf6", pw:1  },
+  { c:"u",  e:0.55, p:"#06b6d4", pw:2  },
+  { c:"i",  e:0.41, p:"#06b6d4", pw:null },
+  { c:"c",  e:0.20, p:"#10b981", pw:3  },
+  { c:"k",  e:0.18, p:"#10b981", pw:null },
+  { c:"▁",  e:0.14, p:"#10b981", pw:null },
+  { c:"b",  e:0.65, p:"#8b5cf6", pw:1  },
+  { c:"r",  e:0.30, p:"#06b6d4", pw:2  },
+  { c:"o",  e:0.22, p:"#06b6d4", pw:null },
+  { c:"w",  e:0.28, p:"#10b981", pw:3  },
+  { c:"n",  e:0.19, p:"#10b981", pw:null },
+  { c:"▁",  e:0.12, p:"#10b981", pw:null },
+  { c:"f",  e:0.58, p:"#8b5cf6", pw:1  },
+  { c:"o",  e:0.45, p:"#06b6d4", pw:2  },
+  { c:"x",  e:0.80, p:"#8b5cf6", pw:null },
+];
+
+function buildBLT() {
+  const wrap = document.getElementById("blt-viz");
+  wrap.innerHTML = "";
+
+  // Title rows
+  const bpeLabel = document.createElement("div");
+  bpeLabel.style.cssText = "font-size:0.72rem;font-family:var(--mono);color:var(--text3);margin-bottom:0.4rem;";
+  bpeLabel.textContent = "↑ Byte entropy — BLT places patch boundaries at peaks";
+  wrap.appendChild(bpeLabel);
+
+  // Bars row
+  const bytesRow = document.createElement("div");
+  bytesRow.className = "bytes-row";
+
+  BLT_DATA.forEach(d => {
+    const cell = document.createElement("div");
+    cell.className = "byte-cell";
+    const barWrap = document.createElement("div");
+    barWrap.className = "byte-bar-wrap";
+    const bar = document.createElement("div");
+    bar.className = "byte-bar";
+    bar.style.cssText = `height:0;background:${d.e > 0.5 ? "#8b5cf6" : d.e > 0.3 ? "#06b6d4" : "#10b981"};`;
+    barWrap.appendChild(bar);
+    const charEl = document.createElement("div");
+    charEl.className = "byte-char";
+    charEl.textContent = d.c === "▁" ? "·" : d.c;
+    cell.appendChild(barWrap);
+    cell.appendChild(charEl);
+    bytesRow.appendChild(cell);
+    setTimeout(() => { bar.style.height = (d.e * 58) + "px"; }, 200);
+  });
+  wrap.appendChild(bytesRow);
+
+  // BLT Patches
+  const patchLabel = document.createElement("div");
+  patchLabel.style.cssText = "font-size:0.72rem;font-family:var(--mono);color:var(--text3);margin-top:0.6rem;margin-bottom:0.3rem;";
+  patchLabel.textContent = "BLT dynamic patches (variable size)";
+  wrap.appendChild(patchLabel);
+
+  const patchRow = document.createElement("div");
+  patchRow.className = "patch-overlay";
+
+  const CELL_W = 24;
+  const GAP = 2;
+  const patches = [
+    { label:"T·h·e·▁", cells:4, color:"#10b981" },
+    { label:"q", cells:1, color:"#8b5cf6" },
+    { label:"u·i", cells:2, color:"#06b6d4" },
+    { label:"c·k·▁", cells:3, color:"#10b981" },
+    { label:"b", cells:1, color:"#8b5cf6" },
+    { label:"r·o", cells:2, color:"#06b6d4" },
+    { label:"w·n·▁", cells:3, color:"#10b981" },
+    { label:"f", cells:1, color:"#8b5cf6" },
+    { label:"o·x", cells:2, color:"#06b6d4" },
+  ];
+  patches.forEach(p => {
+    const pb = document.createElement("div");
+    pb.className = "patch-block";
+    pb.style.cssText = `width:${p.cells*(CELL_W+GAP)-GAP}px;background:${p.color}30;border:1px solid ${p.color}80;color:${p.color};font-size:0.58rem;`;
+    pb.textContent = p.label;
+    patchRow.appendChild(pb);
+  });
+  wrap.appendChild(patchRow);
+
+  // BPE patches for comparison
+  const bpeLabel2 = document.createElement("div");
+  bpeLabel2.style.cssText = "font-size:0.72rem;font-family:var(--mono);color:var(--text3);margin-top:0.8rem;margin-bottom:0.3rem;";
+  bpeLabel2.textContent = "BPE fixed tokens (vocabulary-learned, ignores difficulty)";
+  wrap.appendChild(bpeLabel2);
+
+  const bpeRow = document.createElement("div");
+  bpeRow.className = "patch-overlay";
+  const bpePatches = [
+    { label:"The", cells:3, color:"#8b5cf6" },
+    { label:"▁quick", cells:6, color:"#8b5cf6" },
+    { label:"▁brown", cells:6, color:"#8b5cf6" },
+    { label:"▁fox", cells:4, color:"#8b5cf6" },
+  ];
+  bpePatches.forEach(p => {
+    const pb = document.createElement("div");
+    pb.className = "patch-block";
+    pb.style.cssText = `width:${p.cells*(CELL_W+GAP)-GAP}px;background:#8b5cf620;border:1px solid #8b5cf660;color:#a78bfa;font-size:0.58rem;`;
+    pb.textContent = p.label;
+    bpeRow.appendChild(pb);
+  });
+  wrap.appendChild(bpeRow);
+}
+buildBLT();
+
+/* ═══════════════════════════════════════════
+   INTERSECTION OBSERVER — Trigger animations
+════════════════════════════════════════════ */
+let vbarDone = false, taxDone = false, gaugeDone = false;
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    entry.target.classList.add("in");
+
+    if (entry.target.id === "vbar-section" && !vbarDone) {
+      vbarDone = true;
+      setTimeout(animateVbars, 200);
+    }
+    if (entry.target.id === "tax-section" && !taxDone) {
+      taxDone = true;
+      document.querySelectorAll(".tax-tok").forEach((el, i) => {
+        setTimeout(() => el.classList.add("visible"), i * 50);
+      });
+    }
+    if (entry.target.id === "gauge-section" && !gaugeDone) {
+      gaugeDone = true;
+      setTimeout(animateGauges, 300);
+    }
+  });
+}, { threshold: 0.15 });
+
+document.querySelectorAll(".reveal").forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
