@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Byte Latent Transformer: Inside Meta's Vocabulary-Free LLM · Harsha Raju</title>
+  <meta name="description" content="A deep dive into Meta AI's Byte Latent Transformer — how entropy-based dynamic patching replaces fixed tokenization, and why it matched tokenized LLMs at 8B parameters." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <style>
+    .arch-diagram {
+      background: #16162a;
+      border: 1px solid rgba(139,92,246,0.2);
+      border-radius: 12px;
+      padding: 32px;
+      margin: 24px 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      overflow-x: auto;
+    }
+    .arch-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .arch-box {
+      background: #1e1e35;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 12px 18px;
+      text-align: center;
+      font-size: 0.82rem;
+    }
+    .arch-box.local { border-color: rgba(6,182,212,0.4); color: #67e8f9; }
+    .arch-box.latent { border-color: rgba(139,92,246,0.5); color: #c4b5fd; background: rgba(139,92,246,0.08); }
+    .arch-box.decode { border-color: rgba(16,185,129,0.4); color: #6ee7b7; }
+    .arch-box-label { font-size: 0.68rem; color: #475569; margin-top: 4px; }
+    .arch-arrow { color: #475569; font-size: 1.1rem; }
+
+    .patch-demo {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .patch-demo-label {
+      font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+    .patch-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .patch-chip {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-weight: 600;
+    }
+    .pc-easy { background: rgba(16,185,129,0.12); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.25); }
+    .pc-mid  { background: rgba(245,158,11,0.12); color: #fcd34d; border: 1px solid rgba(245,158,11,0.25); }
+    .pc-hard { background: rgba(139,92,246,0.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.35); }
+    .pc-fixed { background: rgba(71,85,105,0.3); color: #94a3b8; border: 1px solid rgba(71,85,105,0.4); }
+    .patch-legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      font-size: 0.72rem;
+      color: #475569;
+    }
+    .bench-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 20px 0;
+    }
+    .bench-table th {
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .bench-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      color: #94a3b8;
+    }
+    .bench-table tr:last-child td { border-bottom: none; }
+    .bench-table .win { color: #10b981; font-weight: 600; }
+    .bench-table .lose { color: #ef4444; }
+    .bench-table .tie { color: #8b5cf6; font-weight: 600; }
+    .entropy-viz {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .entropy-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 60px;
+      margin-bottom: 8px;
+    }
+    .entropy-bar {
+      flex: 1;
+      border-radius: 3px 3px 0 0;
+      min-width: 18px;
+    }
+    .entropy-chars {
+      display: flex;
+      gap: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: #475569;
+    }
+    .entropy-char { flex: 1; text-align: center; min-width: 18px; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-ml">NLP</span>
+        <span class="tag tag-viz">Deep Dive</span>
+        <span class="tag tag-era">Research</span>
+      </div>
+      <h1 class="post-heading">The Byte Latent Transformer: Inside Meta's Vocabulary-Free LLM</h1>
+      <div class="post-header-meta">
+        <span>📅 16 Jul 2026</span>
+        <span>⏱ 14 min read</span>
+        <span><a href="https://arxiv.org/abs/2412.09871" target="_blank">Paper: arXiv:2412.09871 ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Meta AI's Byte Latent Transformer (BLT) does something that felt impossible two years ago: it trains a large language
+        model directly on raw bytes — no vocabulary, no tokenizer, no merge rules — and matches the performance of
+        tokenized LLMs at 8B parameters and 4 trillion bytes of training data. This is a deep dive into how it works,
+        what the entropy-based patching mechanism actually does, and why this result matters more than the benchmark numbers suggest.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <p>
+        Every language model you've used starts with the same silent preprocessing step: a tokenizer converts raw text
+        into a sequence of integers from a fixed vocabulary. This step is so universal it barely gets mentioned.
+        BPE, Unigram LM, WordPiece — they differ in how they build the vocabulary, but they all assume the same thing:
+        that text should be pre-segmented into discrete tokens before the transformer ever sees it.
+      </p>
+      <p>
+        BLT removes that assumption entirely. The model operates on bytes — the 256-symbol alphabet of raw UTF-8 —
+        and learns to group them dynamically using an entropy estimator. The result, published at ACL 2025, is the
+        first byte-level model to match tokenized baselines at controlled compute.
+      </p>
+      <p>
+        This is a deep dive into exactly how that works. Not just the what, but the why — and what it tells us about
+        the future of language model architecture.
+      </p>
+
+      <!-- ===== 01: The Fixed-Tokenization Problem ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">01</span>
+          <span class="exp-card-title">What Fixed Tokenization Gets Wrong</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The core problem:</strong> fixed tokenization assigns the same computational budget to a predictable
+            English word as to a rare Arabic morpheme. Complexity doesn't correspond to compute.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        Consider what a tokenizer actually does to computation. The transformer's attention mechanism is quadratic in
+        sequence length. Shorter sequences are cheaper. So when a tokenizer merges "the" into a single token,
+        it's not just a bookkeeping decision — it's a compute allocation decision. "The" is easy. Spending one
+        token (one position in the attention matrix) on it is probably right.
+      </p>
+      <p>
+        But the vocabulary is fixed at training time. The same merge rules that make "the" a single token also
+        decide how Arabic clitics split, how Telugu conjuncts encode, how Chinese idioms tokenize.
+        And for those cases, the optimal boundary isn't obvious — it depends on context.
+      </p>
+      <p>
+        There's a deeper problem: character-level noise breaks fixed tokenizers completely. A typo in "the"
+        produces "teh", which tokenizes differently. An OCR error in a scanned document produces character
+        sequences the tokenizer has never seen. The model has no way to recover because the tokenizer made
+        an irreversible decision before the transformer ran.
+      </p>
+
+      <div class="patch-demo">
+        <div class="patch-demo-label">Fixed tokenization (cl100k_base) — same budget for predictable and unpredictable text</div>
+        <div class="patch-row">
+          <span class="patch-chip pc-fixed">the</span>
+          <span class="patch-chip pc-fixed">▁quick</span>
+          <span class="patch-chip pc-fixed">▁brown</span>
+          <span class="patch-chip pc-fixed">▁fox</span>
+          <span class="patch-chip pc-fixed">▁</span>
+          <span class="patch-chip pc-fixed">ج</span>
+          <span class="patch-chip pc-fixed">م</span>
+          <span class="patch-chip pc-fixed">ي</span>
+          <span class="patch-chip pc-fixed">ل</span>
+          <span class="patch-chip pc-fixed">▁12</span>
+          <span class="patch-chip pc-fixed">345</span>
+          <span class="patch-chip pc-fixed">▁xyz</span>
+          <span class="patch-chip pc-fixed">123</span>
+        </div>
+        <div class="patch-legend">
+          <span>One token = one position in attention. Easy English ≈ rare Arabic = unknown byte sequence.</span>
+        </div>
+      </div>
+
+      <!-- ===== 02: The BLT Architecture ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">02</span>
+          <span class="exp-card-title">The BLT Architecture: Three Components</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The design:</strong> BLT uses three components — a local encoder, a large latent transformer,
+            and a local decoder. The expensive part only runs on patches, not individual bytes.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The key insight in BLT's design is separating "local" processing (reading individual bytes, forming patches,
+        reconstructing bytes from patches) from "global" processing (reasoning about long-range context across the whole sequence).
+        The expensive quadratic attention only happens at the patch level.
+      </p>
+
+      <div class="arch-diagram">
+        <div class="arch-row">
+          <div class="arch-box local">
+            <div>Local Encoder</div>
+            <div class="arch-box-label">small transformer<br>reads raw bytes<br>forms patch representations</div>
+          </div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-box latent">
+            <div>Latent Transformer</div>
+            <div class="arch-box-label">large transformer<br>runs on patches only<br>all long-range reasoning here</div>
+          </div>
+          <div class="arch-arrow">→</div>
+          <div class="arch-box decode">
+            <div>Local Decoder</div>
+            <div class="arch-box-label">small transformer<br>reconstructs byte<br>predictions from patches</div>
+          </div>
+        </div>
+        <div style="text-align:center;margin-top:16px;font-size:0.75rem;color:#475569;">
+          Input: raw bytes (UTF-8) &nbsp;→&nbsp; patches (variable-size groups) &nbsp;→&nbsp; output bytes
+        </div>
+      </div>
+
+      <p>
+        The <strong>local encoder</strong> is a small transformer (a few layers) that processes individual bytes
+        and their neighbors. Its job is to form a single patch-level representation — a vector that summarizes
+        a variable number of input bytes. Critically, the patch boundaries are not fixed. They're determined by the
+        entropy estimator described in the next section.
+      </p>
+      <p>
+        The <strong>latent transformer</strong> is the big model — this is where most of the parameters live and where
+        cross-sequence attention happens. It operates purely on patch representations. Because each patch covers
+        multiple bytes, the latent transformer's sequence length is much shorter than the raw byte sequence,
+        making full attention computationally feasible.
+      </p>
+      <p>
+        The <strong>local decoder</strong> is another small transformer that takes patch representations from the
+        latent transformer and reconstructs individual byte predictions. It conditions on the surrounding byte context
+        and the patch representation to produce a probability distribution over the next byte at each position.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Local encoder</span>
+          <span class="stat-pill-val" style="color: var(--cyan)">Small (shared weights)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Latent transformer</span>
+          <span class="stat-pill-val" style="color: var(--accent)">Large (bulk of params)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Local decoder</span>
+          <span class="stat-pill-val" style="color: var(--green)">Small (per-patch)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Attention scope</span>
+          <span class="stat-pill-val" style="color: var(--yellow)">Patches only (not bytes)</span>
+        </div>
+      </div>
+
+      <!-- ===== 03: Entropy-Based Patching ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">03</span>
+          <span class="exp-card-title">Entropy-Based Dynamic Patching</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The key mechanism:</strong> a small local model estimates next-byte entropy at every position.
+            Where entropy is low (predictable text), bytes are grouped into large patches.
+            Where entropy is high (complex or unexpected text), patches shrink to individual bytes.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        This is the most interesting part of BLT. The question of where to draw patch boundaries is answered
+        dynamically, based on how uncertain the model is about the next byte at each position.
+      </p>
+      <p>
+        Entropy here means Shannon entropy of the predicted next-byte distribution: H = −∑ p(b) log p(b).
+        Low entropy means the model assigns high probability to one or a few bytes — the text is predictable.
+        High entropy means probability mass is spread across many bytes — the text is surprising.
+      </p>
+
+      <div class="entropy-viz">
+        <div style="font-size:0.75rem;font-family:'JetBrains Mono',monospace;color:#475569;margin-bottom:8px;">
+          Estimated next-byte entropy across a sample sequence
+        </div>
+        <div class="entropy-row">
+          <div class="entropy-bar" style="height:20%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:15%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:18%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:22%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:60%;background:rgba(139,92,246,0.6);"></div>
+          <div class="entropy-bar" style="height:80%;background:rgba(139,92,246,0.7);"></div>
+          <div class="entropy-bar" style="height:75%;background:rgba(139,92,246,0.7);"></div>
+          <div class="entropy-bar" style="height:25%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:20%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:15%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:70%;background:rgba(245,158,11,0.6);"></div>
+          <div class="entropy-bar" style="height:85%;background:rgba(245,158,11,0.7);"></div>
+          <div class="entropy-bar" style="height:30%;background:rgba(16,185,129,0.4);"></div>
+          <div class="entropy-bar" style="height:25%;background:rgba(16,185,129,0.4);"></div>
+        </div>
+        <div class="entropy-chars">
+          <span class="entropy-char">t</span><span class="entropy-char">h</span><span class="entropy-char">e</span>
+          <span class="entropy-char">▁</span><span class="entropy-char">جـ</span><span class="entropy-char">مـ</span>
+          <span class="entropy-char">يـ</span><span class="entropy-char">ل</span><span class="entropy-char">▁</span>
+          <span class="entropy-char">1</span><span class="entropy-char">2</span><span class="entropy-char">3</span>
+          <span class="entropy-char">4</span><span class="entropy-char">5</span>
+        </div>
+        <div style="font-size:0.72rem;color:#475569;margin-top:8px;">
+          Green (low entropy) → large patches. Purple/yellow (high entropy) → small patches, more compute.
+        </div>
+      </div>
+
+      <p>
+        A patch boundary is placed wherever entropy exceeds a threshold. So a run of predictable English text
+        ("the quick brown fox") might become a single large patch — one position in the latent transformer.
+        A sequence of Arabic morphemes, each of which could be followed by multiple valid continuations,
+        produces many small patches. Novel proper nouns, code, multilingual mixing — anything that raises
+        uncertainty gets more attention compute.
+      </p>
+      <p>
+        This is a fundamentally better match between computation and difficulty than fixed tokenization provides.
+        Fixed tokenization allocates tokens based on training corpus statistics frozen at vocabulary build time.
+        BLT allocates patches based on what's actually hard about <em>this specific sequence</em> at inference time.
+      </p>
+
+      <div class="patch-demo">
+        <div class="patch-demo-label">BLT dynamic patching — compute follows difficulty</div>
+        <div class="patch-row">
+          <span class="patch-chip pc-easy">the quick brown fox</span>
+          <span class="patch-chip pc-hard">جـ</span>
+          <span class="patch-chip pc-hard">مـ</span>
+          <span class="patch-chip pc-hard">يـ</span>
+          <span class="patch-chip pc-hard">ل</span>
+          <span class="patch-chip pc-easy">▁jumped over</span>
+          <span class="patch-chip pc-mid">12</span>
+          <span class="patch-chip pc-mid">34</span>
+          <span class="patch-chip pc-mid">5</span>
+        </div>
+        <div class="patch-legend">
+          <span style="color:#6ee7b7;">■ large patch (low entropy)</span>
+          <span style="color:#fcd34d;">■ medium patch</span>
+          <span style="color:#c4b5fd;">■ single byte (high entropy)</span>
+        </div>
+      </div>
+
+      <!-- ===== 04: Benchmark Results ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">04</span>
+          <span class="exp-card-title">The 8B / 4T Benchmark: What "Parity" Actually Means</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The result:</strong> BLT at 8B parameters, trained on 4 trillion bytes, matches LLaMA 3 (8B, trained
+            on an equivalent compute budget) across standard language modeling benchmarks. This is the first byte-level
+            result to hold at this scale.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        Previous byte-level models existed — MegaByte, ByT5 — but they failed to match tokenized baselines
+        at realistic model scales. The standard explanation was that raw bytes create sequences 3–5× longer than
+        tokenized equivalents, making attention compute too expensive. BLT solves this with the patch mechanism:
+        the latent transformer sees a compressed sequence, not raw bytes.
+      </p>
+
+      <table class="bench-table">
+        <thead>
+          <tr>
+            <th>Benchmark</th>
+            <th>LLaMA 3 8B (tokenized)</th>
+            <th>BLT 8B (byte-level)</th>
+            <th>Winner</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>MMLU (5-shot)</td>
+            <td>66.6</td>
+            <td>65.2</td>
+            <td class="tie">≈ Parity</td>
+          </tr>
+          <tr>
+            <td>HellaSwag</td>
+            <td>82.0</td>
+            <td>81.1</td>
+            <td class="tie">≈ Parity</td>
+          </tr>
+          <tr>
+            <td>ARC-Challenge</td>
+            <td>59.1</td>
+            <td>58.3</td>
+            <td class="tie">≈ Parity</td>
+          </tr>
+          <tr>
+            <td>Noise robustness (typos)</td>
+            <td>baseline</td>
+            <td>+8–15% vs tokenized</td>
+            <td class="win">BLT wins</td>
+          </tr>
+          <tr>
+            <td>Multilingual (rare scripts)</td>
+            <td>baseline</td>
+            <td>+12% vs tokenized</td>
+            <td class="win">BLT wins</td>
+          </tr>
+          <tr>
+            <td>FLOPs at inference</td>
+            <td>baseline</td>
+            <td>~comparable (controlled)</td>
+            <td class="tie">Controlled</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        The "parity" claim is carefully controlled. BLT and the tokenized baseline were trained on the same number
+        of FLOPs, not the same number of bytes. This matters: 4T bytes is a larger dataset in size, but comparable
+        in training compute because each byte requires less processing than a full token in the latent transformer.
+      </p>
+      <p>
+        Where BLT genuinely wins over tokenized models: <strong>noise robustness</strong>. When input text contains
+        typos, OCR errors, unusual Unicode, or mixed scripts, tokenized models degrade significantly — the tokenizer
+        produces unfamiliar sequences that the model hasn't seen patterns for. BLT is inherently robust because it
+        sees individual bytes regardless; the entropy estimator simply increases patch resolution for unusual sequences
+        and gives the latent transformer more compute budget to handle them.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The important nuance:</strong> "parity at 8B" doesn't mean "always as good." On MMLU, BLT is
+        slightly behind LLaMA 3. On noisy/multilingual text, it's clearly ahead. The overall picture is that
+        byte-level and token-level are competitive — which is the actual news, because that wasn't true a year ago.
+      </div>
+
+      <!-- ===== 05: Why BLT Is More Than a Research Result ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">05</span>
+          <span class="exp-card-title">What BLT Changes About LLM Architecture</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The implication:</strong> if bytes and tokens are compute-equivalent at 8B, then the tokenizer
+            is no longer a necessary architectural component. It becomes a design choice with tradeoffs — not a
+            given.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The reason BLT matters isn't the benchmarks. It's what the benchmarks remove as an excuse. Before BLT,
+        "we use tokenization because byte-level doesn't scale" was a fact. After BLT, it's a hypothesis that
+        requires evidence at larger scale.
+      </p>
+      <p>
+        Consider what removing the tokenizer would eliminate: the token tax (Arabic 3.3× vs English, Bengali ~4.5×),
+        arithmetic fragmentation, the vocabulary selection problem (which ACL 2025 proved is NP-complete),
+        the need to maintain separate tokenizer versions across model families, the "unreachable token" bug in GPT-4o,
+        and the dependency on a frozen corpus snapshot from vocabulary training time.
+      </p>
+      <p>
+        None of those problems exist in a byte-level model. The alphabet is 256 bytes. It never changes.
+        It covers every language, every number, every symbol, every byte sequence that can exist.
+      </p>
+      <p>
+        The open question is whether this holds at 70B+ parameters and multi-trillion-byte training runs.
+        BLT showed parity at 8B. Nobody has tried at 70B. The compute overhead of the local encoder and decoder
+        may become a bottleneck at very large scales. The patch mechanism's efficiency depends on the average
+        patch size, which depends on corpus characteristics. These are engineering problems, not fundamental limits —
+        but they're real.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Token tax eliminated</span>
+          <span class="stat-pill-val" style="color: var(--green)">All scripts equal</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Vocab size</span>
+          <span class="stat-pill-val" style="color: var(--cyan)">256 bytes (fixed forever)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Robustness</span>
+          <span class="stat-pill-val" style="color: var(--green)">+8–15% on noisy text</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Proven at</span>
+          <span class="stat-pill-val" style="color: var(--accent)">8B / 4T bytes</span>
+        </div>
+      </div>
+
+      <!-- ===== 06: How It's Built ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">06</span>
+          <span class="exp-card-title">How It's Actually Implemented</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Implementation detail:</strong> the entropy estimator is a small autoregressive model trained
+            jointly with the main model. It runs a forward pass over the byte sequence to place patch boundaries
+            before the latent transformer sees anything.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        One concern with dynamic patching is the overhead of the entropy estimation step. If you have to run
+        a model just to decide where to put boundaries, you've added compute before the main computation even begins.
+      </p>
+      <p>
+        BLT addresses this by using a small local model — the same local encoder used in the main architecture —
+        as the entropy estimator. It's trained jointly, shares weights with the local encoder, and runs a single
+        forward pass over the byte sequence. The patch boundaries are determined by a threshold on the estimated entropy:
+        wherever H(byte_t) exceeds the threshold, a new patch begins.
+      </p>
+
+      <pre><code class="language-python"># Conceptual pseudocode for BLT patching
+def dynamic_patch(byte_sequence, entropy_model, threshold=0.5):
+    entropies = entropy_model.estimate(byte_sequence)  # shape: [seq_len]
+
+    patches = []
+    current_patch_start = 0
+
+    for t, h in enumerate(entropies):
+        if h > threshold:  # high entropy → start new patch here
+            if t > current_patch_start:
+                patches.append(byte_sequence[current_patch_start:t])
+            current_patch_start = t
+
+    patches.append(byte_sequence[current_patch_start:])
+    return patches  # variable-length groups of bytes</code></pre>
+
+      <p>
+        The threshold is a hyperparameter that controls average patch size. Lower threshold → smaller patches →
+        more latent transformer positions → more compute but higher resolution. Higher threshold → larger patches →
+        fewer positions → cheaper but lower resolution for hard text. The paper uses a dynamic threshold based
+        on the fraction of patch boundaries, keeping average patch size roughly constant across different text types.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The elegant part:</strong> the entropy model and the local encoder share weights. So the cost of
+        entropy estimation is amortized — you're running a forward pass you would have run anyway.
+        There's no separate "boundary model" to train or maintain.
+      </div>
+
+      <!-- ===== References ===== -->
+      <div class="exp-card" style="margin-top: 48px;">
+        <div class="exp-card-header">
+          <span class="exp-num">REF</span>
+          <span class="exp-card-title">References</span>
+        </div>
+        <div class="exp-body">
+          <p style="font-size:0.88rem;color:var(--text2);line-height:1.8;">
+            Byte Latent Transformer — Pagnoni et al., Meta AI (ACL 2025, arXiv:2412.09871)<br>
+            LLaMA 3 Technical Report — Meta AI (2024)<br>
+            MegaByte: Predicting Million-byte Sequences with Multiscale Transformers — Yu et al. (2023)<br>
+            ByT5: Towards a Token-Free Future with Pre-trained Byte-to-Byte Models — Xue et al. (2022)<br>
+            Tokenisation is NP-Complete — Whittington et al. (ACL 2025, arXiv:2412.15210)
+          </p>
+        </div>
+      </div>
+
+    </div><!-- /.prose -->
+
+    <div class="demo-btn-wrap">
+      <a href="tokenizer-landscape-2026.html" class="demo-btn">Read the full tokenizer landscape review →</a>
+    </div>
+
+  </div><!-- /.post-wrap -->
+
+  <footer>
+    <div class="footer-inner">
+      <p>Built with vanilla HTML &amp; CSS · <a href="https://github.com/harshvardhanraju/harshvardhanraju.github.io" target="_blank">Source on GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>

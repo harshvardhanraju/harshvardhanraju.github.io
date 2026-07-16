@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How Google Fixed Arithmetic: Inside Gemini's 256K Unigram Tokenizer · Harsha Raju</title>
+  <meta name="description" content="A deep dive into the engineering decisions behind Gemini's tokenizer — 256K vocabulary, split-digit tokenization, Unigram LM, and what it took to make a single tokenizer work for 100+ languages." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/style.css" />
+  <style>
+    .token-split-demo {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 24px;
+      margin: 16px 0;
+    }
+    .tsd-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+    .tsd-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .tsd-model {
+      font-size: 0.78rem;
+      color: #64748b;
+      width: 100px;
+      flex-shrink: 0;
+    }
+    .tok-chips {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .tc {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      padding: 5px 11px;
+      border-radius: 5px;
+      font-weight: 600;
+    }
+    .tc-bad   { background: rgba(239,68,68,0.12); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+    .tc-ok    { background: rgba(16,185,129,0.1);  color: #6ee7b7;  border: 1px solid rgba(16,185,129,0.2); }
+    .tc-warn  { background: rgba(245,158,11,0.1);  color: #fcd34d;  border: 1px solid rgba(245,158,11,0.2); }
+    .tsd-verdict {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin-left: 4px;
+    }
+
+    .unigram-steps {
+      background: #16162a;
+      border: 1px solid rgba(6,182,212,0.2);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin: 16px 0;
+      counter-reset: step;
+    }
+    .unigram-step {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+    .unigram-step:last-child { margin-bottom: 0; }
+    .step-num {
+      background: rgba(6,182,212,0.15);
+      border: 1px solid rgba(6,182,212,0.3);
+      color: #67e8f9;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-text {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+    .step-text strong { color: #f1f5f9; }
+
+    .lang-coverage {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .lang-card {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 8px;
+      padding: 14px 16px;
+      text-align: center;
+    }
+    .lang-name { font-size: 0.88rem; font-weight: 600; margin-bottom: 4px; }
+    .lang-fertility { font-family: 'JetBrains Mono', monospace; font-size: 1.0rem; font-weight: 700; }
+    .lang-note { font-size: 0.72rem; color: #475569; margin-top: 4px; }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 16px 0;
+    }
+    .cmp-card {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 22px;
+    }
+    .cmp-title {
+      font-weight: 700;
+      font-size: 1.0rem;
+      margin-bottom: 14px;
+    }
+    .cmp-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      gap: 12px;
+    }
+    .cmp-row:last-child { border-bottom: none; }
+    .cmp-key { color: #64748b; }
+    .cmp-val { font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+
+    .embed-cost-bar {
+      background: #16162a;
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin: 16px 0;
+    }
+    .ecb-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .ecb-label { font-size: 0.82rem; color: #64748b; width: 130px; flex-shrink: 0; }
+    .ecb-track { flex: 1; height: 32px; background: rgba(255,255,255,0.04); border-radius: 6px; overflow: hidden; }
+    .ecb-fill  { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; font-weight: 700; }
+    .ecb-note  { font-size: 0.75rem; color: #475569; width: 130px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-brand">harsha<span>.</span>dev</a>
+      <div class="nav-links">
+        <a href="/">← Posts</a>
+        <a href="https://github.com/harshvardhanraju" target="_blank">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="post-wrap">
+
+    <header class="post-header">
+      <div class="post-tags">
+        <span class="tag tag-ml">NLP</span>
+        <span class="tag tag-viz">Deep Dive</span>
+        <span class="tag tag-era">Research</span>
+      </div>
+      <h1 class="post-heading">How Google Fixed Arithmetic: Inside Gemini's 256K Unigram Tokenizer</h1>
+      <div class="post-header-meta">
+        <span>📅 16 Jul 2026</span>
+        <span>⏱ 12 min read</span>
+        <span><a href="https://storage.googleapis.com/deepmind-media/gemma/gemma-3-report.pdf" target="_blank">Gemma 3 Technical Report ↗</a></span>
+      </div>
+      <p class="post-lede">
+        Google made two decisions in their Gemini tokenizer that most people haven't noticed:
+        they chose 256K vocabulary (the largest in production) and they changed how numbers tokenize so that arithmetic
+        actually works. Neither decision was incremental. Both required accepting a significant parameter cost upfront
+        in exchange for capabilities the model would otherwise never learn. This is a deep dive into those decisions
+        and the engineering behind them.
+      </p>
+    </header>
+
+    <div class="prose">
+
+      <p>
+        When I built a multilingual BPE tokenizer from scratch for ERA v5 coursework — a 10,000-token vocabulary
+        covering English, Hindi, Telugu, and Bengali — the hardest design choices were about what to optimize.
+        Fertility across scripts? Compression ratio? Vocabulary coverage? Every choice trades off against another.
+      </p>
+      <p>
+        Google faced the same tradeoffs at a completely different scale, with a model family covering 100+ languages
+        and applications ranging from code generation to multilingual chat to mathematical reasoning.
+        The Gemini tokenizer is an existence proof that you can push vocabulary size to 256K without breaking
+        the model — if you're willing to pay the parameter cost and think carefully about what the vocabulary represents.
+      </p>
+
+      <!-- ===== 01: The Vocabulary Size Decision ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">01</span>
+          <span class="exp-card-title">Why 256K? The Multilingual Compression Argument</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The bet:</strong> at 256K tokens, you can give enough vocabulary budget to every major script
+            that no language needs to fragment into character-level sequences for common words.
+            The token tax drops from 3–4× to close to 1× for most languages.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        The root cause of the token tax — Arabic paying 3.3× more than English, Bengali ~4.5× more — is vocabulary
+        budget exhaustion. When GPT-4's cl100k_base tokenizer was trained, English and code dominated the corpus.
+        The BPE merge process allocated most of its 100K vocabulary slots to English words, subwords, and code patterns.
+        Arabic characters, Bengali akshara, Telugu conjuncts — these got whatever budget was left after English filled up.
+        Not enough for common words to become single tokens. They fragment into characters.
+      </p>
+      <p>
+        The solution is more vocabulary. With 256K tokens, you can dedicate tens of thousands of slots to non-Latin
+        scripts and still have room for a comprehensive English and code vocabulary. This is what the Gemma/Gemini
+        tokenizer does: the 256K vocabulary covers 100+ languages with enough slots that common words in all of them
+        can be single tokens.
+      </p>
+      <p>
+        The Gemma 3 Technical Report (March 2025) is explicit: the 256K vocabulary was specifically designed to
+        reduce over-tokenization of non-English text. Fertility measurements across their evaluation languages
+        showed substantially more uniform token rates than smaller-vocabulary baselines.
+      </p>
+
+      <div class="lang-coverage">
+        <div class="lang-card">
+          <div class="lang-name">English</div>
+          <div class="lang-fertility" style="color:var(--green)">~1.0×</div>
+          <div class="lang-note">baseline (cl100k)</div>
+        </div>
+        <div class="lang-card">
+          <div class="lang-name">Chinese</div>
+          <div class="lang-fertility" style="color:var(--green)">~1.1×</div>
+          <div class="lang-note">256K gives full coverage</div>
+        </div>
+        <div class="lang-card">
+          <div class="lang-name">Hindi</div>
+          <div class="lang-fertility" style="color:var(--yellow)">~1.3×</div>
+          <div class="lang-note">improved vs ~1.7× at 100K</div>
+        </div>
+        <div class="lang-card">
+          <div class="lang-name">Arabic</div>
+          <div class="lang-fertility" style="color:var(--yellow)">~1.5×</div>
+          <div class="lang-note">improved vs 3.3× at 100K</div>
+        </div>
+      </div>
+
+      <p>
+        The tradeoff is embedding table size. Vocabulary is not free.
+      </p>
+
+      <div class="embed-cost-bar">
+        <div style="font-size:0.75rem;font-family:'JetBrains Mono',monospace;color:#475569;margin-bottom:14px;">
+          Embedding table parameters at 4096 hidden dimensions (vocab × dim)
+        </div>
+        <div class="ecb-row">
+          <div class="ecb-label">LLaMA 2 (32K)</div>
+          <div class="ecb-track"><div class="ecb-fill" style="width:12.5%;background:linear-gradient(90deg,#334155,#475569);color:#94a3b8;">131M</div></div>
+          <div class="ecb-note"></div>
+        </div>
+        <div class="ecb-row">
+          <div class="ecb-label">LLaMA 3 (128K)</div>
+          <div class="ecb-track"><div class="ecb-fill" style="width:50%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);color:#ede9fe;">524M</div></div>
+          <div class="ecb-note" style="color:var(--accent);">+393M vs LLaMA 2</div>
+        </div>
+        <div class="ecb-row">
+          <div class="ecb-label">GPT-4o (200K)</div>
+          <div class="ecb-track"><div class="ecb-fill" style="width:78%;background:linear-gradient(90deg,#0891b2,#06b6d4);color:#cffafe;">819M</div></div>
+          <div class="ecb-note" style="color:var(--cyan);">15% of a 7B model</div>
+        </div>
+        <div class="ecb-row">
+          <div class="ecb-label">Gemini (256K)</div>
+          <div class="ecb-track"><div class="ecb-fill" style="width:100%;background:linear-gradient(90deg,#059669,#10b981);color:#d1fae5;">1.05B</div></div>
+          <div class="ecb-note" style="color:var(--green);">1B params before layer 1</div>
+        </div>
+      </div>
+
+      <p>
+        At 256K vocabulary and 4096 hidden dimensions, the embedding table alone requires 1.05 billion parameters —
+        before the first transformer layer runs. That's roughly 15% of a 7B model's total parameter budget,
+        or 1.5% of a 70B model's budget. Google's bet is that the multilingual compression benefit — more content
+        per context window, better language parity, reduced API cost for non-English users — is worth that upfront cost.
+      </p>
+
+      <!-- ===== 02: Unigram LM ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">02</span>
+          <span class="exp-card-title">Why Unigram LM Instead of BPE</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The algorithm choice:</strong> Gemini uses Unigram Language Model tokenization via SentencePiece —
+            not BPE. Unigram has a proper probabilistic objective, supports multiple tokenizations per sequence,
+            and prunes a vocabulary rather than building one. The distinction matters at 256K.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        BPE and Unigram LM produce superficially similar outputs — both give you a subword vocabulary with frequencies
+        that correlate with corpus statistics. But they work oppositely: BPE starts small and grows through merges,
+        while Unigram starts enormous and shrinks through pruning.
+      </p>
+
+      <div class="unigram-steps">
+        <div class="unigram-step">
+          <div class="step-num">1</div>
+          <div class="step-text"><strong>Initialize:</strong> Start with an over-complete vocabulary — all substrings up to some length, or a BPE-seeded vocabulary. Typically 2–5× the target size.</div>
+        </div>
+        <div class="unigram-step">
+          <div class="step-num">2</div>
+          <div class="step-text"><strong>E-step:</strong> For each token in the vocabulary, compute the probability of the corpus under the current Unigram LM. This gives each token a log-likelihood contribution.</div>
+        </div>
+        <div class="unigram-step">
+          <div class="step-num">3</div>
+          <div class="step-text"><strong>M-step (prune):</strong> Remove the ~20% of tokens whose removal reduces corpus log-likelihood the least. These are the least informative tokens given the others.</div>
+        </div>
+        <div class="unigram-step">
+          <div class="step-num">4</div>
+          <div class="step-text"><strong>Repeat</strong> until vocabulary reaches target size. The result: a vocabulary where every token earns its slot by reducing description length of the training corpus.</div>
+        </div>
+      </div>
+
+      <p>
+        The key property this gives Gemini's tokenizer: <strong>principled pruning for multilingual vocabularies.</strong>
+        With BPE at 256K, the merge process's greedy frequency criterion can over-allocate to high-frequency English
+        patterns at the expense of rare-but-important morphological units in other languages. Unigram LM's log-likelihood
+        objective naturally keeps vocabulary items that are essential for encoding the training corpus, regardless of
+        absolute frequency — a rare morpheme in Telugu that appears in many root forms gets to stay because removing it
+        would hurt Telugu corpus likelihood even if it barely affects English likelihood.
+      </p>
+      <p>
+        The other advantage: Unigram supports <strong>probabilistic tokenization</strong>. Instead of one deterministic
+        segmentation per sequence, you can sample from the distribution of valid segmentations. This was used as a
+        data augmentation technique in T5 and PaLM — training on multiple tokenizations of the same text makes the
+        model less sensitive to tokenization boundaries. Google's models have used this across their entire family.
+      </p>
+
+      <div class="compare-grid">
+        <div class="cmp-card">
+          <div class="cmp-title" style="color:var(--accent)">BPE (used by: OpenAI, Meta, Qwen)</div>
+          <div class="cmp-row"><span class="cmp-key">Direction</span><span class="cmp-val">Build up (merge)</span></div>
+          <div class="cmp-row"><span class="cmp-key">Criterion</span><span class="cmp-val">Max frequency</span></div>
+          <div class="cmp-row"><span class="cmp-key">Objective</span><span class="cmp-val">Greedy heuristic</span></div>
+          <div class="cmp-row"><span class="cmp-key">Tokenization</span><span class="cmp-val">Deterministic</span></div>
+          <div class="cmp-row"><span class="cmp-key">Multilingual</span><span class="cmp-val">Frequency-biased</span></div>
+        </div>
+        <div class="cmp-card">
+          <div class="cmp-title" style="color:var(--cyan)">Unigram LM (used by: Google, LLaMA 1/2, T5)</div>
+          <div class="cmp-row"><span class="cmp-key">Direction</span><span class="cmp-val">Prune down</span></div>
+          <div class="cmp-row"><span class="cmp-key">Criterion</span><span class="cmp-val">Min likelihood loss</span></div>
+          <div class="cmp-row"><span class="cmp-key">Objective</span><span class="cmp-val">Corpus log-likelihood</span></div>
+          <div class="cmp-row"><span class="cmp-key">Tokenization</span><span class="cmp-val">Probabilistic (sampling)</span></div>
+          <div class="cmp-row"><span class="cmp-key">Multilingual</span><span class="cmp-val">Principled coverage</span></div>
+        </div>
+      </div>
+
+      <!-- ===== 03: Split-Digit Tokenization ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">03</span>
+          <span class="exp-card-title">The Arithmetic Fix: Split-Digit Tokenization</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The design decision:</strong> in Gemini's tokenizer, every decimal digit (0–9) is guaranteed
+            a single dedicated token. Multi-digit numbers always tokenize as one-token-per-digit. This is not the
+            default in BPE — it's an explicit design choice that required overriding merge rules.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        GPT-4 fails at multi-digit arithmetic. Not because the model is bad at math — it's because the tokenizer
+        destroys the structure of numbers before the model ever sees them.
+      </p>
+      <p>
+        In standard BPE, frequently co-occurring digit sequences get merged. "12" might be a single token. "345" might be
+        another. So "12345" tokenizes as ["12", "345"] — and the tens place of the "12" block is spatially adjacent to
+        the hundreds place of the "345" block in token space, but they represent different place values.
+        The model has no consistent positional structure to learn from. Each number has an essentially arbitrary
+        tokenization that depends on which merges happened during vocabulary training.
+      </p>
+
+      <div class="token-split-demo">
+        <div class="tsd-label">How different models tokenize the same number</div>
+        <div class="tsd-row">
+          <div class="tsd-model">GPT-4 (cl100k)</div>
+          <div class="tok-chips">
+            <span class="tc tc-bad">127</span>
+            <span class="tc tc-bad">84</span>
+            <span class="tc tc-bad">9</span>
+          </div>
+          <div class="tsd-verdict">— place values scrambled, no consistent structure</div>
+        </div>
+        <div class="tsd-row">
+          <div class="tsd-model">LLaMA 3 (128K)</div>
+          <div class="tok-chips">
+            <span class="tc tc-warn">12</span>
+            <span class="tc tc-warn">784</span>
+            <span class="tc tc-warn">9</span>
+          </div>
+          <div class="tsd-verdict">— different boundaries, same underlying problem</div>
+        </div>
+        <div class="tsd-row">
+          <div class="tsd-model">Gemini (256K)</div>
+          <div class="tok-chips">
+            <span class="tc tc-ok">1</span>
+            <span class="tc tc-ok">2</span>
+            <span class="tc tc-ok">7</span>
+            <span class="tc tc-ok">8</span>
+            <span class="tc tc-ok">4</span>
+            <span class="tc tc-ok">9</span>
+          </div>
+          <div class="tsd-verdict">— one token per digit, place value is consistent</div>
+        </div>
+      </div>
+
+      <p>
+        With split-digit tokenization, a model can learn that "the token at position N+2 from the start of a number
+        represents the hundreds place" — because that relationship is now stable across all numbers.
+        Addition, subtraction, carry propagation — these become learnable patterns rather than arithmetic performed
+        on an inconsistent symbol soup.
+      </p>
+      <p>
+        The cost is sequence length. "127849" is 6 tokens with split-digit tokenization vs 2–3 tokens with BPE merges.
+        Documents with lots of numbers — financial data, scientific texts, code — get longer token sequences in Gemini
+        than they would in GPT-4. Google judged this a worthwhile tradeoff, and the evidence from Gemini's
+        performance on mathematical benchmarks supports that judgment.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">MATH benchmark (GSM8K)</span>
+          <span class="stat-pill-val" style="color: var(--green)">Strong improvement vs BPE-based</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Sequence length penalty</span>
+          <span class="stat-pill-val" style="color: var(--yellow)">~1.5–2× longer for numbers</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Arithmetic structure</span>
+          <span class="stat-pill-val" style="color: var(--green)">Consistent place values</span>
+        </div>
+      </div>
+
+      <!-- ===== 04: SentencePiece Implementation ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">04</span>
+          <span class="exp-card-title">SentencePiece: The Framework Behind It</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>Why SentencePiece:</strong> Gemini's tokenizer is implemented in SentencePiece — Google's
+            open-source tokenizer framework that handles raw text without pre-tokenization. No regex splitting
+            on whitespace, no language-specific rules. One framework, 100+ languages, same rules.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        Most BPE implementations (including OpenAI's tiktoken and Meta's LLaMA 3 tokenizer) use a pre-tokenization
+        step: a regex splits raw text into candidate words before BPE merges run. This is where language-specific
+        assumptions creep in. A space-splitting regex is wrong for Chinese. A punctuation splitter is wrong for
+        Thai. Even a carefully written Unicode-aware regex bakes in assumptions about what constitutes a "word."
+      </p>
+      <p>
+        SentencePiece avoids this entirely. Its key innovation: treat whitespace as a regular Unicode character
+        (represented as ▁) and run tokenization on the raw text stream without any pre-splitting.
+        This makes it genuinely language-agnostic — the tokenizer sees Japanese text the same way it sees English,
+        because it doesn't try to identify word boundaries before tokenizing.
+      </p>
+
+      <pre><code class="language-python">import sentencepiece as spm
+
+# Training a SentencePiece Unigram model (simplified)
+spm.SentencePieceTrainer.train(
+    input='multilingual_corpus.txt',
+    model_prefix='gemini_tok',
+    vocab_size=256000,
+    model_type='unigram',          # Unigram LM, not BPE
+    character_coverage=0.9999,     # cover 99.99% of Unicode chars
+    split_digits=True,             # Gemini's arithmetic fix
+    byte_fallback=True,            # unknown bytes → byte tokens
+    normalization_rule_name='nfkc' # Unicode normalization
+)
+</code></pre>
+
+      <p>
+        Two parameters in that training call are particularly important for Gemini's design:
+      </p>
+      <p>
+        <code>split_digits=True</code> — this is the arithmetic fix. It instructs SentencePiece to add special
+        handling that prevents digit sequences from merging. Each digit gets its own token, regardless of what
+        the Unigram LM objective would otherwise do.
+      </p>
+      <p>
+        <code>byte_fallback=True</code> — for any byte sequence that cannot be represented by the learned vocabulary,
+        fall back to individual byte tokens (256 possible byte tokens are always in the vocabulary).
+        This makes the tokenizer complete: no input can ever produce an unknown token. Previously,
+        encountering an out-of-vocabulary character would produce a special [UNK] token, losing information.
+        With byte fallback, the model always has access to the raw bytes.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The byte fallback is underappreciated:</strong> it means Gemini's tokenizer has no out-of-vocabulary
+        problem. Novel scripts, unusual Unicode characters, even garbled byte sequences —
+        all representable. This is especially important for OCR input, code generation with unusual symbols,
+        and robustness to adversarial inputs that exploit tokenizer edge cases.
+      </div>
+
+      <!-- ===== 05: Shared Across the Model Family ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">05</span>
+          <span class="exp-card-title">One Tokenizer, Entire Model Family</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The deployment decision:</strong> Google uses the same 256K SentencePiece tokenizer
+            across Gemma 2, Gemma 3, Gemini 1.5, and Gemini 2.0. One vocabulary, shared embeddings,
+            locked for the foreseeable future.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        This is a significant operational commitment. Meta locked their LLaMA 3 tokenizer unchanged across the 3.1,
+        3.2, and 3.3 series. Google has done the same for their 256K vocabulary across a broader family.
+        The reason is compatibility: downstream fine-tunes, embeddings, RLHF pipelines, and retrieval systems
+        that use the tokenizer's indices need to remain stable. Every tokenizer change breaks everything upstream.
+      </p>
+      <p>
+        The 256K vocabulary choice was partly motivated by wanting a design that wouldn't need to change.
+        A larger vocabulary front-loads the compression problem — spending more parameters on embeddings now
+        avoids having to retokenize everything when you inevitably need better multilingual coverage later.
+      </p>
+      <p>
+        This is the same reasoning behind why LLaMA 2's 32K vocabulary was a pain point:
+        when Meta built LLaMA 3, they had to change the tokenizer to fix multilingual coverage,
+        and that change — 32K to 128K — added roughly a billion parameters and broke compatibility
+        with everything trained on LLaMA 2.
+      </p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Used by</span>
+          <span class="stat-pill-val" style="color: var(--cyan)">Gemma 2, Gemma 3, Gemini 1.5, Gemini 2.0</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Languages covered</span>
+          <span class="stat-pill-val" style="color: var(--green)">100+</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Unknown tokens</span>
+          <span class="stat-pill-val" style="color: var(--green)">Zero (byte fallback)</span>
+        </div>
+      </div>
+
+      <!-- ===== 06: What This Means ===== -->
+      <div class="exp-card">
+        <div class="exp-card-header">
+          <span class="exp-num">06</span>
+          <span class="exp-card-title">What Gemini's Tokenizer Gets Right</span>
+        </div>
+        <div class="exp-body">
+          <div class="box box-claim">
+            <strong>The summary:</strong> Gemini made three decisions that other labs haven't: 256K vocabulary
+            (largest in production), Unigram LM with probabilistic sampling, and explicit split-digit tokenization.
+            Each one accepted a cost upfront to fix a problem that BPE-based tokenizers push into the model.
+          </div>
+        </div>
+      </div>
+
+      <p>
+        What's interesting when you look at Gemini's tokenizer as a whole is that every unusual decision is a
+        deliberate fix for a known failure mode. 256K vocabulary: fix the token tax for non-English languages.
+        Unigram LM: principled multilingual coverage, probabilistic augmentation during training.
+        Split-digit: fix arithmetic. Byte fallback: fix unknown tokens. SentencePiece without pre-tokenization:
+        fix language-specific assumptions.
+      </p>
+      <p>
+        Compare this to the "extend cl100k_base" approach used by Qwen — which preserves English/code tokenization
+        quality at the cost of adding CJK vocabulary on top of a system that wasn't designed for it —
+        or the "switch to tiktoken BPE" approach used by LLaMA 3, which achieved 4× vocabulary expansion
+        while accepting a different set of limitations on multilingual coverage.
+      </p>
+      <p>
+        None of these approaches is strictly better. Gemini's tokenizer trades parameter efficiency for breadth.
+        LLaMA 3's trades breadth for speed (tiktoken is significantly faster than SentencePiece).
+        Qwen's trades architectural elegance for backwards compatibility. The right choice depends entirely
+        on what you're optimizing for — and that's before you consider whether byte-level models like BLT
+        make the entire vocabulary question obsolete at the next scale.
+      </p>
+
+      <div class="box box-insight">
+        <strong>The deeper lesson:</strong> the tokenizer encodes assumptions about language that the model
+        cannot override. Split-digit tokenization doesn't make arithmetic easier for the model —
+        it makes it <em>possible</em>. The same structure applies to multilingual coverage, noise robustness,
+        and unknown symbols. The tokenizer makes architectural commitments before a single training step runs.
+        Getting those commitments right matters more than most papers discuss.
+      </div>
+
+      <!-- ===== References ===== -->
+      <div class="exp-card" style="margin-top: 48px;">
+        <div class="exp-card-header">
+          <span class="exp-num">REF</span>
+          <span class="exp-card-title">References</span>
+        </div>
+        <div class="exp-body">
+          <p style="font-size:0.88rem;color:var(--text2);line-height:1.8;">
+            Gemma 3 Technical Report — Google DeepMind (March 2025)<br>
+            SentencePiece: A simple and language independent subword tokenizer and detokenizer — Kudo &amp; Richardson (2018)<br>
+            Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates — Kudo (2018, the Unigram LM paper)<br>
+            LLaMA 3: The Llama 3 Herd of Models — Meta AI (2024)<br>
+            Tokenisation is NP-Complete — Whittington et al. (ACL 2025, arXiv:2412.15210)<br>
+            Tokenization Constraints in LLMs — arXiv 2505.14178 (arithmetic failure formal analysis)
+          </p>
+        </div>
+      </div>
+
+    </div><!-- /.prose -->
+
+    <div class="demo-btn-wrap">
+      <a href="tokenizer-landscape-2026.html" class="demo-btn">Read the full tokenizer landscape review →</a>
+    </div>
+
+  </div><!-- /.post-wrap -->
+
+  <footer>
+    <div class="footer-inner">
+      <p>Built with vanilla HTML &amp; CSS · <a href="https://github.com/harshvardhanraju/harshvardhanraju.github.io" target="_blank">Source on GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
