@@ -446,14 +446,24 @@
     .brand span { color: var(--accent); }
 
     /* ── @media print: each .slide = one page ── */
+    @page {
+      size: 1080px 1080px;
+      margin: 0;
+    }
     @media print {
       .print-hint { display: none; }
-      html, body { background: transparent; }
+      html, body { background: var(--bg); width: 1080px; }
       .slide {
-        width: 100vw; height: 100vh;
+        width: 1080px !important;
+        height: 1080px !important;
         page-break-after: always;
         break-after: page;
         margin: 0;
+        overflow: hidden;
+      }
+      .slide:last-child {
+        page-break-after: avoid;
+        break-after: avoid;
       }
     }
   </style>
@@ -461,9 +471,11 @@
 <body>
 
 <div class="print-hint">
-  <strong>To export as PDF for LinkedIn:</strong>
-  Press <code>Cmd + P</code> → Set paper size to <strong>Custom: 1080 × 1080 px</strong> (or A4 landscape for approximation) →
-  Disable headers/footers → <strong>Save as PDF</strong>. Each slide becomes one carousel page.
+  <strong>Export to PDF for LinkedIn:</strong>
+  Open in <strong>Google Chrome</strong> (not Safari) →
+  <code>Cmd + P</code> → Destination: <strong>Save as PDF</strong> →
+  More settings → Uncheck "Headers and footers" → Paper size will auto-resolve to 1080×1080 from CSS →
+  <strong>Save</strong>. Upload the PDF to LinkedIn as a <strong>Document post</strong>.
   &nbsp;|&nbsp;
   <a href="https://harshvardhanraju.github.io/posts/tokenizers-explained-visually.html" style="color:#8b5cf6;">View live article ↗</a>
 </div>
