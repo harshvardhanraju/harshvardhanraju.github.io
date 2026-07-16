@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tokenizers Explained — LinkedIn Carousel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #0f0f17;
+      --bg2:    #16162a;
+      --accent: #8b5cf6;
+      --cyan:   #06b6d4;
+      --green:  #10b981;
+      --yellow: #f59e0b;
+      --red:    #ef4444;
+      --text:   #f1f5f9;
+      --text2:  #94a3b8;
+      --text3:  #475569;
+      --mono:   'JetBrains Mono', monospace;
+      --sans:   'Inter', sans-serif;
+      --slide:  1080px;
+    }
+
+    html, body { background: #1a1a2e; }
+
+    .print-hint {
+      font-family: var(--sans);
+      background: #1e293b;
+      color: #94a3b8;
+      padding: 1rem 2rem;
+      font-size: 0.9rem;
+      text-align: center;
+      border-bottom: 1px solid #334155;
+    }
+    .print-hint strong { color: #f1f5f9; }
+    .print-hint code { background: #0f172a; padding: 0.1rem 0.4rem; border-radius: 4px; font-family: monospace; }
+
+    /* Each .slide is exactly 1080×1080 — one LinkedIn carousel page */
+    .slide {
+      width: var(--slide);
+      height: var(--slide);
+      background: var(--bg);
+      font-family: var(--sans);
+      color: var(--text);
+      position: relative;
+      overflow: hidden;
+      margin: 0 auto 4px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Subtle grid background */
+    .slide::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(139,92,246,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139,92,246,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+    }
+
+    /* Page number badge */
+    .slide-num {
+      position: absolute;
+      bottom: 36px;
+      right: 48px;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--text3);
+    }
+
+    /* ── Slide 1: Cover ── */
+    .slide-cover {
+      justify-content: center;
+      align-items: center;
+      gap: 0;
+      padding: 80px;
+    }
+    .cover-eyebrow {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      color: var(--accent);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .cover-eyebrow::before, .cover-eyebrow::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(139,92,246,0.3);
+      max-width: 60px;
+    }
+    .cover-title {
+      font-size: 88px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      line-height: 0.92;
+      text-align: center;
+      color: #f8fafc;
+      margin-bottom: 32px;
+    }
+    .cover-title span { color: var(--accent); }
+    .cover-sub {
+      font-size: 22px;
+      color: var(--text2);
+      text-align: center;
+      max-width: 700px;
+      line-height: 1.55;
+      margin-bottom: 56px;
+    }
+    .cover-stats {
+      display: flex;
+      gap: 32px;
+    }
+    .cstat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .cstat-val {
+      font-family: var(--mono);
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .cstat-label {
+      font-size: 13px;
+      color: var(--text3);
+      text-align: center;
+    }
+    .cover-divider {
+      width: 1px;
+      height: 40px;
+      background: rgba(255,255,255,0.1);
+      align-self: center;
+    }
+    .cover-footer {
+      position: absolute;
+      bottom: 36px;
+      left: 0; right: 0;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--text3);
+    }
+    .cover-glow {
+      position: absolute;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* ── Generic slide layout ── */
+    .slide-inner {
+      padding: 64px 72px;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .slide-tag {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .slide-tag::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(139,92,246,0.25);
+    }
+    .slide-h {
+      font-size: 52px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      color: #f8fafc;
+      margin-bottom: 20px;
+    }
+    .slide-h span { color: var(--accent); }
+    .slide-h .cyan { color: var(--cyan); }
+    .slide-h .green { color: var(--green); }
+    .slide-h .red { color: var(--red); }
+    .slide-p {
+      font-size: 20px;
+      color: var(--text2);
+      line-height: 1.6;
+      margin-bottom: 36px;
+      max-width: 900px;
+    }
+    .slide-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+    /* ── Algo grid ── */
+    .algo-3col {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      flex: 1;
+    }
+    .ac {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ac-name {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .ac-used {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text3);
+      line-height: 1.5;
+    }
+    .ac-rule {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--cyan);
+      margin-top: auto;
+    }
+    .ac-step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 15px;
+      color: var(--text2);
+      line-height: 1.4;
+    }
+    .ac-step-n {
+      flex-shrink: 0;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: rgba(139,92,246,0.15);
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--mono);
+      color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── Vocab bars ── */
+    .vbars { display: flex; flex-direction: column; gap: 14px; flex: 1; justify-content: center; }
+    .vb-row { display: flex; align-items: center; gap: 16px; }
+    .vb-lbl {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text3);
+      width: 150px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .vb-track {
+      flex: 1; height: 34px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .vb-fill {
+      height: 100%;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      padding-left: 12px;
+    }
+    .vb-val {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+      white-space: nowrap;
+    }
+
+    /* ── Token tax ── */
+    .tax-rows { display: flex; flex-direction: column; gap: 22px; flex: 1; justify-content: center; }
+    .tx-r { display: flex; flex-direction: column; gap: 8px; }
+    .tx-top { display: flex; align-items: center; justify-content: space-between; }
+    .tx-lang { font-size: 18px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .tx-phrase { font-family: var(--mono); font-size: 12px; color: var(--text3); }
+    .tx-badge {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 6px;
+    }
+    .tx-ok  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .tx-mid { background: rgba(245,158,11,0.15);  color: #fcd34d; }
+    .tx-bad { background: rgba(239,68,68,0.15);   color: #fca5a5; }
+    .tx-toks { display: flex; flex-wrap: wrap; gap: 4px; }
+    .tx-tok {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid;
+    }
+
+    /* ── Arithmetic ── */
+    .arith-rows { display: flex; flex-direction: column; gap: 28px; flex: 1; justify-content: center; }
+    .arith-row { display: flex; flex-direction: column; gap: 10px; }
+    .arith-model { font-family: var(--mono); font-size: 13px; color: var(--text3); }
+    .arith-toks { display: flex; gap: 8px; align-items: center; }
+    .at {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 800;
+      padding: 8px 18px;
+      border-radius: 10px;
+      border: 1px solid;
+    }
+    .at-bad  { background: rgba(239,68,68,0.15);  border-color: rgba(239,68,68,0.4);  color: #fca5a5; }
+    .at-good { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.4); color: #6ee7b7; }
+    .at-note { font-size: 16px; color: var(--text3); }
+
+    /* ── BLT visual ── */
+    .blt-compare { display: flex; flex-direction: column; gap: 28px; flex: 1; justify-content: center; }
+    .blt-row { display: flex; flex-direction: column; gap: 8px; }
+    .blt-label { font-family: var(--mono); font-size: 13px; color: var(--text3); }
+    .blt-bar {
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+    }
+    .blt-patches { display: flex; gap: 4px; }
+    .blt-patch {
+      height: 44px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    /* ── Fertility slide ── */
+    .fert-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 20px; flex: 1; }
+    .fert-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 16px;
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .fert-lang { font-size: 26px; font-weight: 800; color: var(--text); }
+    .fert-script { font-family: var(--mono); font-size: 14px; color: var(--text3); }
+    .fert-val { font-family: var(--mono); font-size: 48px; font-weight: 700; }
+    .fert-track {
+      height: 8px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .fert-fill { height: 100%; border-radius: 4px; }
+
+    /* ── CTA / final ── */
+    .slide-cta {
+      justify-content: center;
+      align-items: center;
+      padding: 80px;
+      gap: 0;
+    }
+    .cta-headline {
+      font-size: 62px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      text-align: center;
+      line-height: 1.0;
+      margin-bottom: 24px;
+      color: #f8fafc;
+    }
+    .cta-headline span { color: var(--accent); }
+    .cta-sub {
+      font-size: 20px;
+      color: var(--text2);
+      text-align: center;
+      max-width: 700px;
+      line-height: 1.55;
+      margin-bottom: 52px;
+    }
+    .cta-links { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+    .cta-link {
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 600;
+      padding: 14px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      text-align: center;
+    }
+    .cta-link-primary {
+      background: var(--accent);
+      color: white;
+    }
+    .cta-link-secondary {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text2);
+    }
+    .brand {
+      position: absolute;
+      bottom: 36px;
+      left: 0; right: 0;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text3);
+    }
+    .brand span { color: var(--accent); }
+
+    /* ── @media print: each .slide = one page ── */
+    @media print {
+      .print-hint { display: none; }
+      html, body { background: transparent; }
+      .slide {
+        width: 100vw; height: 100vh;
+        page-break-after: always;
+        break-after: page;
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="print-hint">
+  <strong>To export as PDF for LinkedIn:</strong>
+  Press <code>Cmd + P</code> → Set paper size to <strong>Custom: 1080 × 1080 px</strong> (or A4 landscape for approximation) →
+  Disable headers/footers → <strong>Save as PDF</strong>. Each slide becomes one carousel page.
+  &nbsp;|&nbsp;
+  <a href="https://harshvardhanraju.github.io/posts/tokenizers-explained-visually.html" style="color:#8b5cf6;">View live article ↗</a>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 1 — Cover
+══════════════════════════════════════ -->
+<div class="slide slide-cover">
+  <div class="cover-glow"></div>
+  <div class="cover-eyebrow">NLP Research</div>
+  <div class="cover-title">Tokenizers<br><span>Explained</span><br>Visually</div>
+  <div class="cover-sub">The step every LLM runs before it reads a single word — and why it decides who pays 4× more.</div>
+  <div class="cover-stats">
+    <div class="cstat">
+      <div class="cstat-val">256K</div>
+      <div class="cstat-label">largest vocab<br>in production</div>
+    </div>
+    <div class="cover-divider"></div>
+    <div class="cstat">
+      <div class="cstat-val">3.3×</div>
+      <div class="cstat-label">Arabic token<br>tax vs English</div>
+    </div>
+    <div class="cover-divider"></div>
+    <div class="cstat">
+      <div class="cstat-val">NP-hard</div>
+      <div class="cstat-label">optimal vocab<br>selection</div>
+    </div>
+  </div>
+  <div class="cover-footer">harshvardhanraju.github.io · Swipe → </div>
+  <div class="slide-num">1 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 2 — Three algorithms
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">01 · The Algorithms</div>
+    <div class="slide-h">Three ways to<br><span>split</span> language</div>
+    <div class="slide-p">BPE, WordPiece, and Unigram LM look identical from outside. The difference is what each decides to merge — and why.</div>
+    <div class="algo-3col">
+      <div class="ac">
+        <div class="ac-name">BPE</div>
+        <div class="ac-used">GPT-4o · LLaMA 3<br>Qwen · DeepSeek</div>
+        <div class="ac-step"><div class="ac-step-n">1</div>Start with every character</div>
+        <div class="ac-step"><div class="ac-step-n">2</div>Find most <strong>frequent</strong> pair</div>
+        <div class="ac-step"><div class="ac-step-n">3</div>Merge it. Repeat.</div>
+        <div class="ac-rule">merge = argmax freq(AB)</div>
+      </div>
+      <div class="ac">
+        <div class="ac-name">WordPiece</div>
+        <div class="ac-used">BERT · DistilBERT<br>older Google models</div>
+        <div class="ac-step"><div class="ac-step-n">1</div>Start with every character</div>
+        <div class="ac-step"><div class="ac-step-n">2</div>Find highest <strong>PMI</strong> pair</div>
+        <div class="ac-step"><div class="ac-step-n">3</div>Merge it. Repeat.</div>
+        <div class="ac-rule">score = freq(AB)/(fA·fB)</div>
+      </div>
+      <div class="ac">
+        <div class="ac-name">Unigram LM</div>
+        <div class="ac-used">Gemma · Gemini<br>T5 · LLaMA 1/2</div>
+        <div class="ac-step"><div class="ac-step-n">1</div>Start with <strong>huge</strong> vocabulary</div>
+        <div class="ac-step"><div class="ac-step-n">2</div>Score each token by log-P</div>
+        <div class="ac-step"><div class="ac-step-n">3</div>Prune least useful. Repeat.</div>
+        <div class="ac-rule">remove = argmin ΔlogP(corpus)</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">2 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 3 — Vocabulary Race
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">02 · The Vocabulary Race</div>
+    <div class="slide-h">32K → <span>256K</span><br>in 18 months</div>
+    <div class="slide-p">Larger vocab = better compression = fewer tokens per sentence = cheaper inference. Every major lab doubled or quadrupled in 2024.</div>
+    <div class="vbars">
+      <div class="vb-row">
+        <div class="vb-lbl">GPT-2 · 2019</div>
+        <div class="vb-track"><div class="vb-fill" style="width:19.6%;background:linear-gradient(90deg,#334155,#475569)"><span class="vb-val">50K</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">LLaMA 2 · 2023</div>
+        <div class="vb-track"><div class="vb-fill" style="width:12.5%;background:linear-gradient(90deg,#3730a3,#4338ca)"><span class="vb-val">32K</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">GPT-4 · 2023</div>
+        <div class="vb-track"><div class="vb-fill" style="width:39.1%;background:linear-gradient(90deg,#6d28d9,#7c3aed)"><span class="vb-val">100K</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">LLaMA 3 · 2024</div>
+        <div class="vb-track"><div class="vb-fill" style="width:50%;background:linear-gradient(90deg,#7c3aed,#8b5cf6)"><span class="vb-val">128K</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">Qwen 2/3 · 2024</div>
+        <div class="vb-track"><div class="vb-fill" style="width:59.4%;background:linear-gradient(90deg,#0e7490,#0891b2)"><span class="vb-val">152K</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">GPT-4o · 2024</div>
+        <div class="vb-track"><div class="vb-fill" style="width:78.1%;background:linear-gradient(90deg,#0891b2,#06b6d4)"><span class="vb-val">200K · –40% CJK tokens</span></div></div>
+      </div>
+      <div class="vb-row">
+        <div class="vb-lbl">Gemma/Gemini</div>
+        <div class="vb-track"><div class="vb-fill" style="width:100%;background:linear-gradient(90deg,#047857,#10b981)"><span class="vb-val">256K ← largest in production</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">3 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 4 — Token Tax
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">03 · The Token Tax</div>
+    <div class="slide-h">Same meaning,<br><span class="red">different cost</span></div>
+    <div class="slide-p">On GPT-4's tokenizer, "I love India" in Arabic costs 3.3× more than English. Non-English users pay a silent tax on every API call.</div>
+    <div class="tax-rows">
+      <div class="tx-r">
+        <div class="tx-top">
+          <div class="tx-lang">🇺🇸 English <span class="tx-phrase">"I love India"</span></div>
+          <span class="tx-badge tx-ok">1.0× cost</span>
+        </div>
+        <div class="tx-toks">
+          <span class="tx-tok" style="background:#7c3aed30;border-color:#7c3aed80;color:#c4b5fd">▁I</span>
+          <span class="tx-tok" style="background:#2563eb30;border-color:#2563eb80;color:#93c5fd">▁love</span>
+          <span class="tx-tok" style="background:#05996930;border-color:#05996980;color:#6ee7b7">▁India</span>
+        </div>
+      </div>
+      <div class="tx-r">
+        <div class="tx-top">
+          <div class="tx-lang">🇮🇳 Hindi <span class="tx-phrase">"मुझे भारत से प्यार है"</span></div>
+          <span class="tx-badge tx-mid">2.1× cost</span>
+        </div>
+        <div class="tx-toks">
+          <span class="tx-tok" style="background:#7c3aed30;border-color:#7c3aed80;color:#c4b5fd">▁म</span>
+          <span class="tx-tok" style="background:#4f46e530;border-color:#4f46e580;color:#a5b4fc">ु</span>
+          <span class="tx-tok" style="background:#2563eb30;border-color:#2563eb80;color:#93c5fd">झे</span>
+          <span class="tx-tok" style="background:#0891b230;border-color:#0891b280;color:#67e8f9">▁भ</span>
+          <span class="tx-tok" style="background:#0e749030;border-color:#0e749080;color:#a5f3fc">ार</span>
+          <span class="tx-tok" style="background:#04785730;border-color:#04785780;color:#6ee7b7">त</span>
+          <span class="tx-tok" style="background:#05996930;border-color:#05996980;color:#6ee7b7">▁स</span>
+          <span class="tx-tok" style="background:#d9780630;border-color:#d9780680;color:#fcd34d">े</span>
+          <span class="tx-tok" style="background:#b4530930;border-color:#b4530980;color:#fde68a">▁प्यार</span>
+          <span class="tx-tok" style="background:#99181830;border-color:#99181880;color:#fca5a5">▁है</span>
+        </div>
+      </div>
+      <div class="tx-r">
+        <div class="tx-top">
+          <div class="tx-lang">🇸🇦 Arabic <span class="tx-phrase">"أنا أحب الهند"</span></div>
+          <span class="tx-badge tx-bad">3.3× cost</span>
+        </div>
+        <div class="tx-toks">
+          <span class="tx-tok" style="background:#7c3aed30;border-color:#7c3aed80;color:#c4b5fd">▁أ</span>
+          <span class="tx-tok" style="background:#4f46e530;border-color:#4f46e580;color:#a5b4fc">ن</span>
+          <span class="tx-tok" style="background:#2563eb30;border-color:#2563eb80;color:#93c5fd">ا</span>
+          <span class="tx-tok" style="background:#0891b230;border-color:#0891b280;color:#67e8f9">▁أ</span>
+          <span class="tx-tok" style="background:#0e749030;border-color:#0e749080;color:#a5f3fc">ح</span>
+          <span class="tx-tok" style="background:#04785730;border-color:#04785780;color:#6ee7b7">ب</span>
+          <span class="tx-tok" style="background:#05996930;border-color:#05996980;color:#6ee7b7">▁ال</span>
+          <span class="tx-tok" style="background:#d9780630;border-color:#d9780680;color:#fcd34d">ه</span>
+          <span class="tx-tok" style="background:#b4530930;border-color:#b4530980;color:#fde68a">ند</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">4 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 5 — Arithmetic Failure
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">04 · The Arithmetic Problem</div>
+    <div class="slide-h">LLMs don't fail<br>at math. Their <span class="red">tokenizer</span> does.</div>
+    <div class="slide-p">The number 12345 has no consistent token representation. The model never sees digits — it sees opaque numeric blobs. No place-value structure = no arithmetic.</div>
+    <div class="arith-rows">
+      <div class="arith-row">
+        <div class="arith-model">GPT-4o · same number, different context A</div>
+        <div class="arith-toks">
+          <span class="at at-bad">123</span>
+          <span class="at at-bad">45</span>
+          <span class="at-note">— 2 tokens. No digit structure.</span>
+        </div>
+      </div>
+      <div class="arith-row">
+        <div class="arith-model">GPT-4o · same number, different context B</div>
+        <div class="arith-toks">
+          <span class="at at-bad">12</span>
+          <span class="at at-bad">345</span>
+          <span class="at-note">— Different split. Different representation.</span>
+        </div>
+      </div>
+      <div class="arith-row">
+        <div class="arith-model">Gemma · split-digit tokenizer (the only clean fix)</div>
+        <div class="arith-toks">
+          <span class="at at-good">1</span>
+          <span class="at at-good">2</span>
+          <span class="at at-good">3</span>
+          <span class="at at-good">4</span>
+          <span class="at at-good">5</span>
+          <span class="at-note">— Always 5 tokens. Consistent place-value.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-num">5 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 6 — BLT Dynamic Patching
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">05 · The Byte-Level Future</div>
+    <div class="slide-h">Meta's BLT:<br><span class="green">no vocabulary at all</span></div>
+    <div class="slide-p">Byte Latent Transformer (ACL 2025) matched tokenized LLMs at 8B / 4T bytes — by allocating compute where text is hard, not where the vocabulary says to cut.</div>
+    <div class="blt-compare">
+      <div class="blt-row">
+        <div class="blt-label">Standard BPE — fixed cuts wherever the vocabulary learned</div>
+        <div class="blt-patches">
+          <div class="blt-patch" style="width:120px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">▁The</div>
+          <div class="blt-patch" style="width:180px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">▁quick</div>
+          <div class="blt-patch" style="width:172px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">▁brown</div>
+          <div class="blt-patch" style="width:144px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">▁fox</div>
+          <div class="blt-patch" style="width:170px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">▁jumps</div>
+        </div>
+      </div>
+      <div class="blt-row">
+        <div class="blt-label">BLT — short patches (more compute) on complex bytes, long on easy</div>
+        <div class="blt-patches">
+          <div class="blt-patch" style="width:200px;background:#10b98120;border:1px solid #10b98160;color:#6ee7b7">T·h·e·▁ (easy)</div>
+          <div class="blt-patch" style="width:60px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">q</div>
+          <div class="blt-patch" style="width:100px;background:#06b6d420;border:1px solid #06b6d460;color:#67e8f9">u·i</div>
+          <div class="blt-patch" style="width:160px;background:#10b98120;border:1px solid #10b98160;color:#6ee7b7">c·k·▁</div>
+          <div class="blt-patch" style="width:60px;background:#8b5cf620;border:1px solid #8b5cf660;color:#c4b5fd">b</div>
+          <div class="blt-patch" style="width:100px;background:#06b6d420;border:1px solid #06b6d460;color:#67e8f9">r·o·w·n</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:20px;padding:18px 22px;background:rgba(16,185,129,0.08);border-left:3px solid #10b981;border-radius:8px;font-size:17px;color:var(--text2);line-height:1.55;">
+      <strong style="color:#6ee7b7;">Result:</strong> Matches tokenized LLMs at fixed FLOP cost. Better robustness to typos, OCR errors, rare scripts. No vocabulary to violate.
+    </div>
+  </div>
+  <div class="slide-num">6 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 7 — Fertility / ERA v5
+══════════════════════════════════════ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-tag">06 · Measuring Fairness</div>
+    <div class="slide-h"><span>Fertility spread 0.034</span> —<br>4.3× more equitable</div>
+    <div class="slide-p">A 10K-token BPE vocabulary trained to compress English, Hindi, Telugu, and Bengali within a spread of 0.034 — vs 0.154 for the reference solution.</div>
+    <div class="fert-grid">
+      <div class="fert-card">
+        <div class="fert-lang">Bengali</div>
+        <div class="fert-script">বাংলা · best compression</div>
+        <div class="fert-val" style="color:#10b981">1.2576</div>
+        <div class="fert-track"><div class="fert-fill" style="width:43%;background:#10b981"></div></div>
+      </div>
+      <div class="fert-card">
+        <div class="fert-lang">Hindi</div>
+        <div class="fert-script">हिन्दी · Devanagari</div>
+        <div class="fert-val" style="color:#06b6d4">1.2636</div>
+        <div class="fert-track"><div class="fert-fill" style="width:44%;background:#06b6d4"></div></div>
+      </div>
+      <div class="fert-card">
+        <div class="fert-lang">English</div>
+        <div class="fert-script">Latin script</div>
+        <div class="fert-val" style="color:#8b5cf6">1.2883</div>
+        <div class="fert-track"><div class="fert-fill" style="width:48%;background:#8b5cf6"></div></div>
+      </div>
+      <div class="fert-card">
+        <div class="fert-lang">Telugu</div>
+        <div class="fert-script">తెలుగు · worst compression</div>
+        <div class="fert-val" style="color:#f59e0b">1.2911</div>
+        <div class="fert-track"><div class="fert-fill" style="width:49%;background:#f59e0b"></div></div>
+      </div>
+    </div>
+    <div style="margin-top:18px;padding:14px 18px;background:rgba(245,158,11,0.08);border-left:3px solid #f59e0b;border-radius:8px;font-size:16px;color:var(--text2);">
+      <strong style="color:#fcd34d;">Score = 1000 / (max_fertility − min_fertility) = 1000 / 0.034 = 29,820</strong> · After Hindi penalty: 28,280
+    </div>
+  </div>
+  <div class="slide-num">7 / 8</div>
+</div>
+
+
+<!-- ══════════════════════════════════════
+     SLIDE 8 — CTA
+══════════════════════════════════════ -->
+<div class="slide slide-cta">
+  <div class="cover-glow"></div>
+  <div class="cta-headline">Want the<br><span>full picture?</span></div>
+  <div class="cta-sub">
+    Interactive BPE demo, animated token tax, entropy patching visualised, live multilingual tokenizer —
+    all in the browser, no installs.
+  </div>
+  <div class="cta-links">
+    <a class="cta-link cta-link-primary" href="https://harshvardhanraju.github.io/posts/tokenizers-explained-visually.html">
+      Visual Guide → harshvardhanraju.github.io
+    </a>
+    <a class="cta-link cta-link-secondary" href="https://harsha-erav5-s2.netlify.app">
+      Live Multilingual Tokenizer → harsha-erav5-s2.netlify.app
+    </a>
+  </div>
+  <div class="brand">harsha<span>.</span>dev · built during ERA v5 coursework</div>
+  <div class="slide-num">8 / 8</div>
+</div>
+
+</body>
+</html>
